@@ -6,6 +6,7 @@ Handles reading file content and generating a Markdown export suitable for LLMs.
 
 import sys
 import os
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import List, Set, Optional, Dict, Any, Callable, Tuple
@@ -124,6 +125,32 @@ def read_file_content(path: Path, max_size: int, log_func: Callable) -> Tuple[Op
         log_func(f"LLM Export: Error reading file '{path.name}': {e}", "error")
         return None, 0 # Indicate failure to read
 
+# --- Clean Tree Generation for Markdown ---
+
+def create_clean_tree_for_markdown(tree_lines: List[str]) -> List[str]:
+    """
+    Creates a clean version of the tree lines suitable for markdown display.
+    Removes ANSI color codes and other terminal-specific formatting.
+
+    Args:
+        tree_lines: The original tree lines with ANSI color codes
+
+    Returns:
+        A list of clean tree lines suitable for markdown
+    """
+    # Regular expression to match ANSI escape sequences
+    ansi_escape = re.compile(r'\033\[[0-9;]*[a-zA-Z]')
+
+    # Create clean tree lines
+    clean_lines = []
+    for line in tree_lines:
+        # Remove ANSI color codes
+        clean_line = ansi_escape.sub('', line)
+        # Replace any other terminal-specific characters if needed
+        clean_lines.append(clean_line)
+
+    return clean_lines
+
 # --- Export Generation ---
 
 def generate_llm_export(
@@ -162,7 +189,9 @@ def generate_llm_export(
     export_content.append(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     export_content.append("\n## Directory Structure")
     export_content.append("```")
-    export_content.extend(tree_lines) # Add the visual tree
+    # Create a clean version of the tree lines for markdown
+    clean_tree_lines = create_clean_tree_for_markdown(tree_lines)
+    export_content.extend(clean_tree_lines) # Add the clean visual tree
     export_content.append("```\n")
 
     # 2. Process listed files for content inclusion
