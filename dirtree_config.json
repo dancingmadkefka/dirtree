@@ -1,0 +1,27 @@
+{
+  "root_dir": "C:\\Users\\daniel\\VSCodeProjects\\todo_timeline",
+  "style": "emoji",
+  "max_depth": 5,
+  "show_hidden": false,
+  "show_size": false,
+  "show_permissions": false,
+  "show_owner": false,
+  "show_modified": false,
+  "show_symlinks": true,
+  "follow_symlinks": false,
+  "sort_by": "name",
+  "reverse_sort": false,
+  "include_patterns": [],
+  "exclude_patterns": [
+    "node_modules"
+  ],
+  "colorize": true,
+  "include_files": true,
+  "include_dirs": true,
+  "size_format": "auto",
+  "date_format": "%Y-%m-%d %H:%M:%S",
+  "output_format": "text",
+  "show_full_path": false,
+  "output_file": null,
+  "clipboard": true
+}
