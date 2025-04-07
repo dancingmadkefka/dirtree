@@ -21,3 +21,6 @@ __version__ = "2.3.0"
 from .dirtree_core import IntuitiveDirTree
 from .dirtree_config import COMMON_EXCLUDES, DEFAULT_LLM_EXCLUDED_EXTENSIONS
 from .dirtree_cli import main
+
+# Define what gets imported with 'from dirtree_lib import *'
+__all__ = ['IntuitiveDirTree', 'COMMON_EXCLUDES', 'DEFAULT_LLM_EXCLUDED_EXTENSIONS', 'main']

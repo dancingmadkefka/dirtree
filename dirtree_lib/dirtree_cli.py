@@ -15,20 +15,29 @@ try:
     from . import __version__
     from .dirtree_core import IntuitiveDirTree
     from .dirtree_interactive import run_interactive_setup, pick_available
-    from .dirtree_config import COMMON_EXCLUDES # Needed for argparse help
-    from .dirtree_styling import TreeStyle, Colors # For help messages
-    from .dirtree_utils import format_bytes, parse_size_string # Utilities
+    from .dirtree_config import COMMON_EXCLUDES as common_excludes # Needed for argparse help, but not for fallbacks
+    from .dirtree_styling import TreeStyle, Colors # For help messages, but not for fallbacks
+    from .dirtree_utils import parse_size_string # Utilities, but not for fallbacks
 except ImportError as e:
     print(f"Error importing dirtree modules: {e}", file=sys.stderr)
     print("Please ensure you are running this from the correct directory or have installed the package.", file=sys.stderr)
-    # Define dummy fallbacks to allow argparse setup at least
+    # Define dummy fallbacks to allow argparse setup at least, but not for fallbacks
     __version__ = "?.?.?"
-    class IntuitiveDirTree: pass
+    # Use different names for fallback classes to avoid type conflicts
+    class _DummyIntuitiveDirTree:
+        def __init__(self, **kwargs): pass
+        def run(self): pass
+    # Assign the dummy class to the expected name
+    IntuitiveDirTree = _DummyIntuitiveDirTree
     def run_interactive_setup(): return {}
     pick_available = False
-    COMMON_EXCLUDES = []
-    class TreeStyle: AVAILABLE = {}
-    class Colors: RESET = ""; BOLD = ""; GREEN = ""; YELLOW = ""; RED = ""
+    common_excludes = []
+    class _DummyTreeStyle:
+        AVAILABLE = {}
+    TreeStyle = _DummyTreeStyle
+    class _DummyColors:
+        RESET = ""; BOLD = ""; GREEN = ""; YELLOW = ""; RED = ""
+    Colors = _DummyColors
     # Exit if imports fail, as the script cannot function
     sys.exit(1)
 
@@ -210,7 +219,7 @@ def main():
     try:
         args = parse_args()
         config = {}
-        
+
         # Show version info
         if args.debug:
             print(f"IntuitiveDirTree v{__version__}")
@@ -234,7 +243,7 @@ def main():
                 config = run_interactive_setup()
                 if not config: # Setup was cancelled
                     sys.exit(0)
-            except Exception as e_interactive:
+            except Exception as _:
                 print(f"\n{Colors.RED}An error occurred during interactive setup:{Colors.RESET}")
                 print(traceback.format_exc())
                 sys.exit(1)
@@ -258,7 +267,7 @@ def main():
             exclude_patterns = list(args.exclude) # Start with manual excludes
             if args.use_smart_exclude:
                 # Append smart excludes
-                exclude_patterns.extend(COMMON_EXCLUDES)
+                exclude_patterns.extend(common_excludes)
             config['include_patterns'] = args.include
             config['exclude_patterns'] = exclude_patterns
             config['use_smart_exclude'] = args.use_smart_exclude # Store the setting
@@ -272,7 +281,7 @@ def main():
                      sys.exit(1)
                 config['llm_content_extensions'] = args.llm_ext # Pass list or None
                 config['llm_indicators'] = args.llm_indicators # Pass LLM indicators setting
-                
+
                 # Set output directory if specified
                 if args.llm_output_dir:
                     output_dir = Path(args.llm_output_dir)
@@ -311,11 +320,11 @@ def main():
         except SystemExit: # Catch explicit exits (like abort from error handling)
             # Message should already be printed by the handler
             sys.exit(1) # Ensure non-zero exit code on abort
-        except Exception as e_run:
+        except Exception as _:
             print(f"\n{Colors.RED}An unexpected error occurred during execution:{Colors.RESET}")
             print(traceback.format_exc())
             sys.exit(1)
-            
+
     except KeyboardInterrupt:
         print("\nOperation cancelled by user.")
         sys.exit(130)  # Standard exit code for SIGINT
