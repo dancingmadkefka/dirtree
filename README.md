@@ -45,15 +45,48 @@ The LLM export mode is great for getting help from AI assistants:
 
 ## Installation
 
+### Basic Installation
+
 ```bash
 # Clone it
 git clone https://github.com/dancingmadkefka/dirtree.git
 cd dirtree
 
-# If you want interactive mode
+# Install dependencies
 pip install pick
 # On Windows, also install:
 pip install windows-curses
+```
+
+### System-wide Installation
+
+To install DirTree so you can run it from anywhere:
+
+```bash
+# Clone the repository
+git clone https://github.com/dancingmadkefka/dirtree.git
+cd dirtree
+
+# Install as an editable package
+pip install -e .
+
+# Now you can run from anywhere
+dirtree -i
+```
+
+### Updating an Existing Installation
+
+If you've already installed DirTree and want to update to the latest version:
+
+```bash
+# Navigate to your dirtree directory
+cd path/to/dirtree
+
+# Pull the latest changes
+git pull
+
+# If you installed as an editable package, no further steps needed!
+# The changes are automatically available
 ```
 
 ## License
