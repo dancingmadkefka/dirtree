@@ -160,7 +160,8 @@ def generate_llm_export(
     max_llm_file_size: int,
     llm_content_extensions_set: Optional[Set[str]],
     log_func: Callable,
-    output_dir: Optional[Path] = None # Directory to save the export file
+    output_dir: Optional[Path] = None, # Directory to save the export file
+    add_file_marker: bool = False # Whether to add a special marker to the generated file
 ) -> Optional[Path]:
     """
     Generates a Markdown file containing the directory structure and selected file contents.
@@ -185,6 +186,12 @@ def generate_llm_export(
     files_checked = 0
 
     # 1. Add Header
+    # Add a special marker if requested (invisible character sequence that can be detected by filters)
+    if add_file_marker:
+        # Add a special marker at the beginning of the file (zero-width space + special comment)
+        export_content.append("\u200B<!-- DIRTREE_GENERATED_FILE -->")
+        log_func("Added special marker to generated file for future exclusion", "debug")
+
     export_content.append(f"# Directory Tree for: {root_dir.name}")
     export_content.append(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     export_content.append("\n## Directory Structure")

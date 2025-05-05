@@ -61,7 +61,8 @@ class IntuitiveDirTree:
             # Behavior
             verbose: bool = False, interactive_prompts: bool = True, skip_errors: bool = False,
             # New options
-            output_dir: Optional[str] = None  # Directory to save LLM export
+            output_dir: Optional[str] = None,  # Directory to save LLM export
+            add_file_marker: bool = False  # Whether to add a special marker to generated files
     ):
         try:
             self.root_dir = Path(root_dir).resolve(strict=True) # Strict check ensures exists
@@ -126,6 +127,9 @@ class IntuitiveDirTree:
 
         # Save output directory
         self.output_dir = Path(output_dir) if output_dir else None
+
+        # Store file marker setting
+        self.add_file_marker = add_file_marker
 
         # --- Internal State ---
         self.skipped_items = []
@@ -501,7 +505,8 @@ class IntuitiveDirTree:
                 max_llm_file_size=self.max_llm_file_size,
                 llm_content_extensions_set=self.llm_content_extensions_set,
                 log_func=self._log,
-                output_dir=self.output_dir # Use configured output directory
+                output_dir=self.output_dir, # Use configured output directory
+                add_file_marker=self.add_file_marker # Add special marker if enabled
             )
 
             # Update content size stats

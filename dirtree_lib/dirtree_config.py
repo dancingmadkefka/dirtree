@@ -41,10 +41,10 @@ def set_default_dir(directory: str) -> None:
                 config = json.loads(config_file.read_text(encoding='utf-8'))
             except Exception:
                 pass  # Start fresh if the file is corrupted
-        
+
         # Update with new default directory
         config['default_dir'] = str(Path(directory).resolve())
-        
+
         # Write back to file
         config_file.write_text(json.dumps(config, indent=2), encoding='utf-8')
     except Exception as e:
@@ -61,18 +61,18 @@ def save_config(config: Dict[str, Any]) -> None:
                 existing_config = json.loads(config_file.read_text(encoding='utf-8'))
             except Exception:
                 pass  # Start fresh if the file is corrupted
-        
+
         # Filter out unwanted keys (like root_dir which changes per run)
         save_keys = {
             'style', 'max_depth', 'show_hidden', 'colorize', 'show_size',
             'use_smart_exclude', 'export_for_llm', 'max_llm_file_size',
-            'llm_content_extensions', 'verbose', 'skip_errors'
+            'llm_content_extensions', 'verbose', 'skip_errors', 'add_file_marker'
         }
         # Update only allowed keys
         for key in save_keys:
             if key in config:
                 existing_config[key] = config[key]
-        
+
         # Write back to file
         config_file.write_text(json.dumps(existing_config, indent=2), encoding='utf-8')
     except Exception as e:
@@ -120,9 +120,9 @@ DEFAULT_LLM_EXCLUDED_EXTENSIONS: Set[str] = {
 # Default extensions to include in LLM exports (common code and text files)
 DEFAULT_LLM_INCLUDE_EXTENSIONS: Set[str] = {
     # Programming languages
-    "py", "pyw", "js", "jsx", "ts", "tsx", "java", "c", "cpp", "h", "hpp", 
+    "py", "pyw", "js", "jsx", "ts", "tsx", "java", "c", "cpp", "h", "hpp",
     "cs", "go", "rb", "php", "swift", "kt", "rs", "sh", "bash", "zsh",
-    "ps1", "bat", "cmd", 
+    "ps1", "bat", "cmd",
     # Config and data formats
     "json", "yaml", "yml", "xml", "toml", "ini", "cfg", "conf", "csv",
     # Markup and documentation
