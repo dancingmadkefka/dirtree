@@ -1,4 +1,5 @@
-# This file makes the dirtree_lib directory a Python package.# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
+# This file makes the dirtree_lib directory a Python package.
 """
 IntuitiveDirTree Package - A User-Friendly Directory Tree Visualizer with LLM Export
 
@@ -15,7 +16,7 @@ Usage:
 """
 
 # Package version
-__version__ = "2.4.0" # Updated version
+__version__ = "2.4.0"  # Updated version
 
 # Import public classes and functions for direct access
 from .dirtree_core import IntuitiveDirTree
@@ -23,4 +24,7 @@ from .dirtree_config import COMMON_DIR_EXCLUDES, COMMON_FILE_EXCLUDES, DEFAULT_L
 from .dirtree_cli import main
 
 # Define what gets imported with 'from dirtree_lib import *'
-__all__ = ['IntuitiveDirTree', 'COMMON_DIR_EXCLUDES', 'COMMON_FILE_EXCLUDES', 'DEFAULT_LLM_EXCLUDED_EXTENSIONS', 'main']
+__all__ = [
+    'IntuitiveDirTree', 'COMMON_DIR_EXCLUDES', 'COMMON_FILE_EXCLUDES',
+    'DEFAULT_LLM_EXCLUDED_EXTENSIONS', 'main'
+]

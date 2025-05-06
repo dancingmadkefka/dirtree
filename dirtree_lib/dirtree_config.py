@@ -92,7 +92,7 @@ COMMON_DIR_EXCLUDES: List[str] = [
     # Node.js
     "node_modules",
     # Python
-    "__pycache__", "venv", "env", ".venv",
+    "__pycache__", "__tests__", "__mocks__", "venv", "env", ".venv",
     "dist", "build", "htmlcov", ".pytest_cache", ".mypy_cache",
     # IDE and editor files (often directories)
     ".idea", ".vscode", ".vs",

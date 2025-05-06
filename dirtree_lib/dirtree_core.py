@@ -9,7 +9,7 @@ import sys
 import os
 import traceback
 from pathlib import Path
-from typing import List, Optional, Dict, Tuple, Set, Any, Callable
+from typing import List, Optional, Tuple, Set
 
 # --- Imports from other modules ---
 try:
@@ -90,13 +90,13 @@ class IntuitiveDirTree:
         self.cli_include_patterns = list(cli_include_patterns or [])
         self.cli_exclude_patterns = list(cli_exclude_patterns or [])
         self.use_smart_exclude = use_smart_exclude
-        
+
         self.interactive_ft_includes_llm = set(interactive_file_type_includes_for_llm or [])
         self.interactive_dir_excludes_llm = set(interactive_dir_excludes_for_llm or [])
 
         self.export_for_llm = export_for_llm
         self.max_llm_file_size = max_llm_file_size
-        
+
         # Consolidate LLM content extensions
         if llm_content_extensions is not None: # CLI --llm-ext takes precedence
             self.llm_content_extensions_set = {ext.lower().lstrip('.') for ext in llm_content_extensions}
@@ -125,14 +125,14 @@ class IntuitiveDirTree:
         self._cached_tree_lines: Optional[List[str]] = None
         self._cached_listed_paths_in_tree: Optional[List[Path]] = None
         self._seen_paths_build: Set[Path] = set()
-        
+
         self._filetype_colors = DEFAULT_FILETYPE_COLORS.copy()
         self._filetype_emojis = DEFAULT_FILETYPE_EMOJIS.copy()
 
         self.llm_files_considered = 0
         self.llm_files_included_content = 0
         self.llm_total_content_size_bytes = 0
-        
+
         self._log = lambda msg, level="info": log_message(msg, level, self.verbose, self.colorize)
         self._log_config()
 
@@ -148,7 +148,7 @@ class IntuitiveDirTree:
         if self.use_smart_exclude:
             self._log(f"    Smart Dir Excludes (tree): {self.smart_dir_excludes}", "debug")
             self._log(f"    Smart File Excludes (LLM): {self.smart_file_excludes_for_llm}", "debug")
-        
+
         self._log(f"  Interactive Dir Excludes (LLM): {self.interactive_dir_excludes_llm}", "debug")
         self. _log(f"  LLM Content Extensions (final): {self.llm_content_extensions_set or 'Default (non-binary)'}", "debug")
 
@@ -212,7 +212,7 @@ class IntuitiveDirTree:
         file_entries = [e for e in entries if e.is_file(follow_symlinks=False)]
         other_entries = [e for e in entries if not e.is_dir(follow_symlinks=False) and not e.is_file(follow_symlinks=False)]
         ordered_entries = dir_entries + file_entries + other_entries
-        
+
         # Tree style elements
         style = self.style_config
         pointers = {
@@ -238,11 +238,11 @@ class IntuitiveDirTree:
             if not should_display_entry:
                 self._log(f"Tree Filter: '{entry_path.name}' HIDDEN from tree. Reason: {tree_exclude_reason}", "debug")
                 continue
-            
+
             self.items_listed_in_tree += 1
-            
+
             is_smart_excluded_dir_type = any(fnmatch.fnmatch(entry.name, pattern) for pattern in self.smart_dir_excludes)
-            
+
             should_recurse_for_tree_display = False
             if is_entry_dir:
                 should_recurse_for_tree_display = should_recurse_for_tree(
@@ -258,8 +258,8 @@ class IntuitiveDirTree:
                 self.llm_files_considered += 1
                 try:
                     # Get size without following symlinks for files
-                    size_bytes = entry.stat(follow_symlinks=False).st_size 
-                    
+                    size_bytes = entry.stat(follow_symlinks=False).st_size
+
                     # This function now considers all exclusion types
                     is_llm_content_included = should_include_content_for_llm(
                         entry_path, self.root_dir, size_bytes, self.max_llm_file_size,
@@ -280,10 +280,10 @@ class IntuitiveDirTree:
 
                 except Exception as e_llm_check:
                     self._log(f"Could not check LLM inclusion for '{entry_path}': {e_llm_check}", "warning")
-            
+
             # --- Formatting for Tree Line ---
             is_last_entry = (i == len(ordered_entries) - 1)
-            
+
             if is_entry_dir:
                 pointer = pointers["dir_last_tee"] if is_last_entry else pointers["dir_tee"]
             else:
@@ -302,7 +302,7 @@ class IntuitiveDirTree:
                 except Exception as e_size:
                     self._log(f"Could not get size for '{entry_path}': {e_size}", "warning")
                     size_info_str = f" ({Colors.RED}Size N/A{reset})"
-            
+
             # Smart excluded dirs get a special marker in the tree
             # This is different from manually excluded for LLM dirs, which show full structure.
             smart_exclude_indicator = ""
@@ -331,7 +331,7 @@ class IntuitiveDirTree:
                         tree_lines.append(f"{next_prefix}{Colors.RED}! Error in subdirectory: {e_recurse}{Colors.RESET}")
                     else:
                         raise SystemExit(f"Aborted by user due to error recursing into {entry_path}.") from e_recurse
-        
+
         if 'real_path' in locals() and real_path in self._seen_paths_build:
              self._seen_paths_build.remove(real_path)
         return tree_lines, listed_paths_in_tree

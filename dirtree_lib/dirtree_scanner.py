@@ -6,9 +6,7 @@ Used to discover file types or directory names for interactive filtering.
 
 import sys
 import time
-import shutil
 import os
-import fnmatch
 from pathlib import Path
 from collections import Counter
 from typing import List, Set, Counter as CounterType, Callable, Optional
@@ -33,7 +31,7 @@ def scan_directory(
     log_func: Callable, # Function for logging messages
     # For scanning, we primarily care about not recursing into very large common junk folders.
     # Other exclude patterns are less relevant for simple discovery.
-    initial_scan_recursion_excludes: Optional[List[str]] = None 
+    initial_scan_recursion_excludes: Optional[List[str]] = None
 ) -> CounterType[str]:
     """
     Scans directory to find file extensions or directory names for interactive selection lists.
@@ -46,7 +44,8 @@ def scan_directory(
 
     spinner_chars = ["/", "-", "\\", "|"] if sys.stdout.isatty() else [""]
     spinner_idx = 0
-    term_width = shutil.get_terminal_size((80, 20)).columns
+    # Get terminal width for potential future use
+    # term_width = shutil.get_terminal_size((80, 20)).columns
     last_status_len = 0
     last_update_time = time.monotonic()
 
@@ -60,7 +59,7 @@ def scan_directory(
     final_recursion_excludes = hardcoded_scan_perf_excludes.copy()
     if initial_scan_recursion_excludes:
         final_recursion_excludes.update(initial_scan_recursion_excludes)
-    
+
     log_func(f"Scanner will not recurse into (for perf): {final_recursion_excludes}", "debug")
 
     dirs_to_scan_queue: List[Path] = []
@@ -76,8 +75,10 @@ def scan_directory(
          log_func(f"Could not resolve root '{root_dir}' for scan: {e_resolve_root}", "warning")
          # Add unresolved path to seen set to prevent trying to resolve it again if encountered
          # This doesn't fully prevent loops if symlinks point back to unresolved paths, but helps.
-         try: seen_physical_dirs.add(root_dir.absolute()) 
-         except: pass # If absolute also fails
+         try:
+             seen_physical_dirs.add(root_dir.absolute())
+         except Exception:
+             pass # If absolute also fails
          dirs_to_scan_queue.append(root_dir)
 
     try:
@@ -104,7 +105,7 @@ def scan_directory(
                     if is_hidden_entry and not show_hidden:
                         log_func(f"Scan Filter: Skipping hidden '{entry.name}' during discovery", "debug")
                         continue
-                    
+
                     # Note: We do NOT apply complex exclude patterns during this discovery scan,
                     # only the `final_recursion_excludes` for performance.
 
@@ -127,7 +128,7 @@ def scan_directory(
                         if scan_type == "dir":
                             item_counter[dir_name_str] += 1
                             log_func(f"Scan Found Dir Name: '{dir_name_str}'", "debug")
-                        
+
                         # Recursion decision for scan performance
                         if dir_name_str not in final_recursion_excludes:
                             try:
@@ -142,7 +143,7 @@ def scan_directory(
                                 log_func(f"Scan: Could not resolve dir '{entry_path_obj}', not queueing: {e_resolve_entry}", "warning")
                         else:
                              log_func(f"Scan Skip Recurse (perf): '{dir_name_str}' is in perf exclude list", "debug")
-                
+
                 if scanned_count >= max_items:
                     log_func(f"Scan reached max items ({max_items}).", "info")
                     break

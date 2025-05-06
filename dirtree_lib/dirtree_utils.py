@@ -8,7 +8,7 @@ import traceback
 import textwrap
 from pathlib import Path
 from datetime import datetime
-from typing import Tuple, Callable, TYPE_CHECKING, Optional
+from typing import Tuple, Callable, Optional
 
 # Import Colors from the styling module
 try:
@@ -43,7 +43,7 @@ def parse_size_string(size_str: str, default: int = 100 * 1024) -> int:
     size_str_orig = size_str # Keep original for warning message
     size_str = size_str.strip().lower()
     if not size_str: return default
-    
+
     multiplier = 1
     if size_str.endswith('k') or size_str.endswith('kb'):
         multiplier = 1024
@@ -56,7 +56,7 @@ def parse_size_string(size_str: str, default: int = 100 * 1024) -> int:
         size_str = size_str[:-1] if size_str.endswith('g') else size_str[:-2]
     elif size_str.endswith('b'): # Explicit bytes
         size_str = size_str[:-1]
-        
+
     try:
         value = float(size_str)
         return int(value * multiplier)
@@ -70,7 +70,7 @@ def format_wrapped_text(text: str, indent: int = 0, width: Optional[int] = None)
     """
     if width is None:
         width = get_terminal_width()
-    
+
     wrap_width = max(width - indent, 40)
     indent_str = ' ' * indent
     wrapped_lines = textwrap.wrap(text, width=wrap_width, subsequent_indent=indent_str)
@@ -89,7 +89,7 @@ def log_message(message: str, level: str = "info", verbose: bool = False, colori
     if not verbose and level not in ["error", "warning", "success"]: # Always show critical messages if not verbose
         if verbose is False and level in ["info", "debug"]: # Explicit verbose=False hides these
              return
-    
+
     color_map = {
         "error": Colors.RED, "warning": Colors.YELLOW, "success": Colors.GREEN,
         "info": Colors.CYAN, "debug": Colors.GRAY
@@ -97,11 +97,11 @@ def log_message(message: str, level: str = "info", verbose: bool = False, colori
     color = color_map.get(level.lower(), Colors.RESET) if colorize else ""
     reset = Colors.RESET if colorize else ""
     timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3] # Milliseconds
-    
+
     # Ensure message is string and handle multi-line messages correctly for logging
     message_str = str(message)
     log_prefix = f"[{timestamp}] {color}[{level.upper():<7}] {reset}" # Padded level
-    
+
     # Indent subsequent lines of a multi-line message
     lines = message_str.splitlines()
     if not lines: return
@@ -132,7 +132,7 @@ def handle_error(
     error_details = str(error)
     full_error_message = f"Error {phase} '{path}': {error_name}: {error_details}"
     log_func(full_error_message, level="error")
-    
+
     guidance = ""
     if isinstance(error, PermissionError):
         guidance = f"This is a {color_yellow}permission error{color_reset}. Try running with administrator/root privileges if appropriate."
@@ -140,7 +140,7 @@ def handle_error(
         guidance = "The file or directory may have been moved or deleted during execution."
     elif isinstance(error, OSError) and hasattr(error, 'winerror') and getattr(error, 'winerror') == 32: # Windows specific: file in use
         guidance = "The file might be locked or in use by another process."
-        
+
     if current_skip_all_errors:
         log_func(f"Auto-skipping '{path}' due to --skip-errors or previous choice.", "warning")
         return True, True # Skip this item, keep skip_all as True
@@ -156,7 +156,7 @@ def handle_error(
     print(f"Path: {Colors.CYAN}{path}{color_reset}\nReason: {error_name}: {error_details}")
     if guidance: print(f"{color_yellow}{guidance}{color_reset}")
     print(f"{color_red}---------------------------{color_reset}")
-    
+
     while True:
         prompt_text = (f"{color_yellow}Action? (1=Skip item, 2=Skip ALL future errors, 3=Abort script, 4=Show details): {color_reset}")
         choice = input(prompt_text).strip().lower()

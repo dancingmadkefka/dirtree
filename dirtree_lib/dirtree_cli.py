@@ -248,7 +248,7 @@ def main():
                 config = run_interactive_setup() # This will populate config with all necessary keys
                 if not config: # Setup was cancelled
                     sys.exit(0)
-            except Exception as e_interactive:
+            except Exception:
                 print(f"\n{Colors.RED}An error occurred during interactive setup:{Colors.RESET}")
                 print(traceback.format_exc())
                 sys.exit(1)
@@ -271,7 +271,7 @@ def main():
             config['cli_include_patterns'] = args.cli_include_patterns
             config['cli_exclude_patterns'] = args.cli_exclude_patterns
             config['use_smart_exclude'] = args.use_smart_exclude
-            
+
             # Interactive selections are not made in CLI mode, so these would be empty or None
             config['interactive_file_type_includes_for_llm'] = [] # Not set via CLI directly
             config['interactive_dir_excludes_for_llm'] = []      # Not set via CLI directly
@@ -321,7 +321,7 @@ def main():
              sys.exit(1)
         except SystemExit:
             sys.exit(1) # Already handled by error handler or user abort
-        except Exception as e_runtime:
+        except Exception:
             print(f"\n{Colors.RED}An unexpected error occurred during execution:{Colors.RESET}")
             print(traceback.format_exc())
             sys.exit(1)

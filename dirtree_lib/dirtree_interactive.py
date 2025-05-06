@@ -36,12 +36,14 @@ except Exception as e: # Broad exception for curses issues
 try:
     from .dirtree_config import COMMON_DIR_EXCLUDES, COMMON_FILE_EXCLUDES, get_default_dir, set_default_dir, save_config, DEFAULT_LLM_INCLUDE_EXTENSIONS, DEFAULT_LLM_EXCLUDED_EXTENSIONS
     from .dirtree_scanner import scan_directory
-    from .dirtree_styling import Colors, DEFAULT_FILETYPE_COLORS
+    from .dirtree_styling import Colors, DEFAULT_FILETYPE_COLORS, TreeStyle
     from .dirtree_utils import format_bytes, log_message, parse_size_string
     from . import __version__
 except ImportError:
     print("Warning: Running interactive module potentially outside of package context.", file=sys.stderr)
     class Colors: RESET = ""; YELLOW = ""; GREEN = ""; CYAN = ""; BOLD = ""; RED = ""; MAGENTA = ""
+    class TreeStyle:
+        AVAILABLE = {"ascii": {}, "unicode": {}, "bold": {}, "rounded": {}, "emoji": {}, "minimal": {}}
     DEFAULT_LLM_INCLUDE_EXTENSIONS = set()
     DEFAULT_LLM_EXCLUDED_EXTENSIONS = set()
     DEFAULT_FILETYPE_COLORS = {}
@@ -75,11 +77,11 @@ def select_directory_interactive(start_dir: Optional[str] = None) -> Optional[st
         while True:
             options = []
             title_parts = [f"Directory Browser - Current: {Colors.CYAN}{current_path}{Colors.RESET}"]
-            
+
             # Parent directory option
             if current_path.parent != current_path: # Not at root
                 options.append(("⬆️  .. (Parent Directory)", str(current_path.parent)))
-            
+
             # Back option if history exists
             if visited_paths:
                 options.append(("⏪ Back (Previous Directory)", "__BACK__"))
@@ -91,7 +93,7 @@ def select_directory_interactive(start_dir: Optional[str] = None) -> Optional[st
                     key=lambda x: x[0].lower()
                 )
                 options.extend(dirs_in_current)
-                
+
                 file_count = sum(1 for _ in current_path.iterdir() if _.is_file())
                 title_parts.append(f"({len(dirs_in_current)} dirs, {file_count} files)")
             except Exception as e:
@@ -101,7 +103,7 @@ def select_directory_interactive(start_dir: Optional[str] = None) -> Optional[st
             options.append(("❌ Cancel Selection", "__CANCEL__"))
 
             title = " ".join(title_parts)
-            
+
             picker = pick_module.Picker(options, title, indicator='=>', min_selection_count=1)
             selected_option_tuple, _ = picker.start() # Can raise KeyboardInterrupt
 
@@ -109,7 +111,7 @@ def select_directory_interactive(start_dir: Optional[str] = None) -> Optional[st
 
             if selected_value == "__CANCEL__": return None
             if selected_value == str(current_path): return str(current_path) # ✅ Select Current
-            
+
             new_path_candidate = Path(selected_value)
             if selected_value == "__BACK__":
                 if visited_paths:
@@ -149,28 +151,33 @@ def general_interactive_selection(
 
     options = []
     for name, count in sorted_items:
-        prefix = "✓ " if name in actual_preselected else "  "
+        # Don't show pre-selection ticks as they're confusing
+        # Instead, mark smart-excluded directories with a special indicator
+        if name in COMMON_DIR_EXCLUDES or name.startswith("__"):
+            prefix = "🔒 "  # Lock symbol to indicate these are always excluded
+        else:
+            prefix = "  "
         options.append((f"{prefix}{name} ({count} occurrences)", name))
 
     options.insert(0, (f"✅ Select ALL {item_type_label}s", "__ALL__"))
     options.insert(1, (f"❌ Select NONE ({mode_action_word} nothing)", "__NONE__"))
-    
+
     if common_items_suggestion:
         found_common = any(name in common_items_suggestion for name, _ in sorted_items)
         if found_common:
             options.insert(2, (f"🔍 Select {common_suggestion_label}", "__COMMON__"))
-    
-    full_title = f"{prompt_title}\nControls: ↑/↓ Navigate | Space Toggle | Enter Confirm\nTip: 'ALL'/'NONE'/'COMMON' can save time."
+
+    full_title = f"{prompt_title}\nControls: ↑/↓ Navigate | Space Toggle | Enter Confirm\nTip: 'ALL'/'NONE'/'COMMON' can save time.\nNote: 🔒 items are always excluded regardless of selection."
 
     try:
         # Pre-select items by marking them in the options list for display
         # The actual selection happens via user interaction.
         picker = pick_module.Picker(options, full_title, indicator='*', multiselect=True, default_index=0)
-        
+
         # Mark preselected items in the picker instance if library supports it
         # (This is tricky with `pick`; usually selection is purely interactive)
         # For now, visual indication in option text is the main preselection cue.
-        
+
         selected_options_tuples = picker.start() # List of (option_data, index)
     except (KeyboardInterrupt, Exception) as e:
         print(f"\n{item_type_label.capitalize()} selection cancelled or failed.")
@@ -191,7 +198,7 @@ def general_interactive_selection(
             selected_names = [name for name, _ in sorted_items if name in DEFAULT_LLM_INCLUDE_EXTENSIONS][:10]
     else: # Regular selection
         selected_names = [val for val in explicitly_selected_values if val not in ("__ALL__", "__NONE__", "__COMMON__")]
-    
+
     print(f"{Colors.GREEN}Selected {len(selected_names)} {item_type_label}s to {mode_action_word}:{Colors.RESET} "
           f"{', '.join(selected_names[:10]) if selected_names else 'None'}"
           f"{' and more...' if len(selected_names) > 10 else ''}")
@@ -221,7 +228,7 @@ def run_interactive_setup() -> Dict[str, Any]:
         (f"{len(dir_options)+2}) Enter a path manually", "__MANUAL__"),
         (f"{len(dir_options)+3}) Cancel setup", "__CANCEL__")
     ])
-    
+
     dir_choice_idx = 0 # Default to current directory
     if pick_available and pick_module:
         picker = pick_module.Picker([opt[0] for opt in dir_options], "Choose directory source:", indicator="=>")
@@ -248,7 +255,7 @@ def run_interactive_setup() -> Dict[str, Any]:
             print(f"{Colors.RED}Error: Invalid path or not a directory. Aborting.{Colors.RESET}"); return {}
     else: # Direct path choice (current or default)
         config['root_dir'] = chosen_dir_action
-    
+
     print(f"Using directory: {Colors.CYAN}{config['root_dir']}{Colors.RESET}")
     if config['root_dir'] != default_dir_path_str and chosen_dir_action not in [str(current_dir_path), default_dir_path_str]:
         if input(f"Set '{config['root_dir']}' as default for future runs? [y/{Colors.GREEN}N{Colors.RESET}]: ").lower() == 'y':
@@ -270,7 +277,7 @@ def run_interactive_setup() -> Dict[str, Any]:
     # Initialize filter lists
     config['cli_include_patterns'] = [] # Not set interactively, from CLI only
     config['cli_exclude_patterns'] = [] # Not set interactively, from CLI only
-    
+
     initial_scan_excludes = list(COMMON_DIR_EXCLUDES) if config['use_smart_exclude'] else []
 
     # Interactive Filtering for LLM Content
@@ -278,7 +285,7 @@ def run_interactive_setup() -> Dict[str, Any]:
     if input(f"Scan directory to select file types/directories for LLM export? [y/{Colors.GREEN}N{Colors.RESET}]: ").lower() == 'y':
         scan_max = 20000
         verbose_log_scan = lambda msg, lvl="debug": log_message(msg, level=lvl, verbose=True, colorize=True)
-        
+
         # Scan for file types (for LLM content inclusion)
         print(f"\n--- Scanning for File Types (for LLM Content Inclusion) ---")
         input("Press Enter to start scan...")
@@ -296,12 +303,14 @@ def run_interactive_setup() -> Dict[str, Any]:
         input("Press Enter to start scan...")
         dir_names_counts = scan_directory(Path(config['root_dir']), "dir", scan_max, config['show_hidden'], verbose_log_scan, initial_scan_excludes)
         if dir_names_counts:
-            # Pre-select common build/cache dirs if found, to suggest for LLM exclusion
-            preselect_dirs_for_llm_exclude = [name for name in dir_names_counts if name in COMMON_DIR_EXCLUDES or name.startswith("__")]
-            config['interactive_dir_excludes_for_llm'] = general_interactive_selection(
-                dir_names_counts, "directory name", "Select Directory Names to EXCLUDE from LLM Export Content:", "EXCLUDE",
-                preselected_items=preselect_dirs_for_llm_exclude
+            # We no longer pre-select items as it's confusing, but we still show which ones are always excluded
+            # The user's selections will be added to the automatic exclusions
+            user_selected_dirs = general_interactive_selection(
+                dir_names_counts, "directory name", "Select ADDITIONAL Directory Names to EXCLUDE from LLM Export Content:", "EXCLUDE"
             )
+
+            # Store the user's selections in the config
+            config['interactive_dir_excludes_for_llm'] = user_selected_dirs
         else:
             config['interactive_dir_excludes_for_llm'] = []
     else:
@@ -326,7 +335,7 @@ def run_interactive_setup() -> Dict[str, Any]:
     # Tree Depth
     max_depth_str = input(f"Max tree display depth (number, or empty for unlimited) [{Colors.GREEN}unlimited{Colors.RESET}]: ").strip()
     config['max_depth'] = int(max_depth_str) if max_depth_str.isdigit() else None
-    
+
     # Show Size in Tree
     config['show_size'] = input(f"Show file sizes in tree? [y/{Colors.GREEN}N{Colors.RESET}]: ").lower() == 'y'
     config['colorize'] = input(f"Use colors in tree output? [{Colors.GREEN}Y{Colors.RESET}/n]: ").lower() not in ['n', 'no']
@@ -347,7 +356,7 @@ def run_interactive_setup() -> Dict[str, Any]:
 
         config['output_dir'] = input(f"Directory to save LLM export (empty for current dir): ").strip() or None
         config['add_file_marker'] = input(f"Add exclusion marker to LLM export file? [{Colors.GREEN}Y{Colors.RESET}/n]: ").lower() not in ['n', 'no']
-        
+
         print("LLM inclusion indicators in tree:")
         print("  (1) Show only included [LLM✓] (Default)")
         print("  (2) Show all [LLM✓/✗]")
@@ -386,14 +395,14 @@ def run_interactive_setup() -> Dict[str, Any]:
         print(f"  LLM Indicators in Tree: {config['llm_indicators']}")
     else:
         print(f"{Colors.BOLD}LLM Export:{Colors.RESET} No")
-    
+
     print(f"{Colors.BOLD}Behavior:{Colors.RESET}")
     print(f"  Verbose: {'Yes' if config['verbose'] else 'No'}, Skip Errors: {'Yes' if config['skip_errors'] else 'No (ask)'}")
 
     if input("\nPress Enter to generate with these settings, or 'q' to quit: ").lower() == 'q':
         print("Setup cancelled.")
         return {}
-    
+
     save_config_choice = input(f"Save these settings (excluding directory) for future defaults? [y/{Colors.GREEN}N{Colors.RESET}]: ").lower()
     if save_config_choice == 'y':
         save_config(config) # save_config should filter what it saves

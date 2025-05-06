@@ -57,13 +57,20 @@ def should_include_content_for_llm(
     # 2. Check if inside a Smart Excluded Directory
     current_parent = file_path.parent
     while current_parent != root_dir and current_parent.parent != current_parent :
+        # Check against smart exclude patterns
         for smart_dir_pattern in smart_dir_excludes:
             if fnmatch.fnmatch(current_parent.name, smart_dir_pattern):
                 log_func(f"LLM Content: SKIP '{relative_path_str}' (inside smart excluded dir '{current_parent.name}' matching '{smart_dir_pattern}')", "debug")
                 return False
+
+        # Also exclude directories starting with double underscores (like __tests__, __mocks__)
+        if current_parent.name.startswith("__"):
+            log_func(f"LLM Content: SKIP '{relative_path_str}' (inside double-underscore dir '{current_parent.name}')", "debug")
+            return False
+
         if current_parent == root_dir: break # Stop if we hit root
         current_parent = current_parent.parent
-        
+
     # 3. Check if inside an Interactively Excluded Directory (for LLM)
     current_parent = file_path.parent
     while current_parent != root_dir and current_parent.parent != current_parent:
@@ -78,7 +85,7 @@ def should_include_content_for_llm(
         if fnmatch.fnmatch(file_name, smart_file_pattern):
             log_func(f"LLM Content: SKIP '{relative_path_str}' (matches smart file LLM exclude pattern '{smart_file_pattern}')", "debug")
             return False
-            
+
     # 5. Check file size
     if file_size < 0: # Unknown size
         log_func(f"LLM Content: SKIP '{relative_path_str}' (unknown size).", "debug")
@@ -104,7 +111,7 @@ def should_include_content_for_llm(
         if ext in DEFAULT_LLM_INCLUDE_EXTENSIONS or ext not in DEFAULT_LLM_EXCLUDED_EXTENSIONS :
              log_func(f"LLM Content: INCLUDE '{relative_path_str}' (passed default extension checks).", "debug")
              return True
-        
+
         log_func(f"LLM Content: SKIP '{relative_path_str}' (failed default extension checks, ext: '{ext}').", "debug")
         return False # Fallback if not explicitly included by default logic
 
@@ -127,7 +134,7 @@ def read_file_content(path: Path, max_size_to_read: int, log_func: Callable) -> 
             file_bytes = file_bytes[:max_size_to_read]
             truncated = True
             log_func(f"LLM Export: Content for '{path.name}' was truncated to {format_bytes(max_size_to_read)} (original {format_bytes(actual_file_size)}).", "warning")
-        
+
         content_str = None
         # Try common encodings
         encodings_to_try = ['utf-8', 'latin-1', sys.getdefaultencoding()]
@@ -135,18 +142,18 @@ def read_file_content(path: Path, max_size_to_read: int, log_func: Callable) -> 
             try:
                 content_str = file_bytes.decode(enc)
                 log_func(f"LLM Export: Read '{path.name}' with encoding '{enc}'.", "debug")
-                break 
+                break
             except UnicodeDecodeError:
                 log_func(f"LLM Export: Decoding '{path.name}' with '{enc}' failed.", "debug")
                 continue
-        
+
         if content_str is None: # All decodes failed
             content_str = file_bytes.decode('utf-8', errors='replace') # Force decode with replacements
             log_func(f"LLM Export: Force decoded '{path.name}' with UTF-8 (replacing errors).", "warning")
 
         if truncated:
             content_str += "\n... [TRUNCATED]"
-        
+
         # Return the string and its byte size after potential truncation and encoding
         return content_str, len(content_str.encode('utf-8', errors='replace'))
 
@@ -159,7 +166,7 @@ def create_clean_tree_for_markdown(tree_lines: List[str]) -> List[str]:
     ansi_escape = re.compile(r'\033\[[0-9;]*[a-zA-Z]')
     # Also remove LLM indicators from the tree structure in markdown
     llm_indicator_pattern = re.compile(r'\s*\[LLM[✓✗]\]')
-    
+
     clean_lines = []
     for line in tree_lines:
         clean_line = ansi_escape.sub('', line)
@@ -189,7 +196,7 @@ def generate_llm_export(
     export_lines: List[str] = []
     total_content_bytes = 0
     files_with_content_included = 0
-    
+
     if add_file_marker:
         export_lines.append("\u200B<!-- DIRTREE_GENERATED_FILE -->")
 
@@ -205,7 +212,7 @@ def generate_llm_export(
         ext_list = sorted(list(llm_content_extensions_set))
         export_lines.append(f"*Content included for file extensions: {', '.join(ext_list) if ext_list else 'None specified'}*\n")
     else:
-        export_lines.append(f"*Content included based on default logic (common text files, excluding binaries).*\n")
+        export_lines.append("*Content included based on default logic (common text files, excluding binaries).*\n")
     export_lines.append(f"*Maximum file size for inclusion: {format_bytes(max_llm_file_size)}*\n")
 
     actual_content_added_to_export = False
@@ -236,13 +243,13 @@ def generate_llm_export(
                 export_lines.append(f"```{lang_hint}")
                 export_lines.append(content_str)
                 export_lines.append("```\n")
-                
+
                 total_content_bytes += content_bytes_read
                 files_with_content_included += 1
                 actual_content_added_to_export = True
             else:
                  log_func(f"LLM Export: Skipping content for '{item_path.name}' due to read error or it was empty.", "warning")
-    
+
     if not actual_content_added_to_export:
         export_lines.append("*No file content was included in this export based on the current settings and file checks.*\n")
 

@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 import shutil
+from typing import List
 
 # Use the conftest.py setup to ensure imports work
 from .conftest import COMMON_DIR_EXCLUDES, create_test_structure, run_dirtree_and_capture # Updated import
@@ -65,7 +66,7 @@ def test_complex_cli_pattern_interactions_for_tree(base_test_structure, run_dirt
         'use_smart_exclude': False
     }
     out, _, _, _, _ = run_dirtree_and_capture(config)
-    
+
     assert_tree_contains(out, ["main.py", "test_main.py", "test_helpers.py"]) # test_*.py are still .py files
     assert_tree_not_contains(out, ["src/utils", "helpers.py"]) # helpers.py is inside excluded src/utils
 
@@ -79,7 +80,7 @@ def test_nested_cli_include_exclude_for_tree(base_test_structure, run_dirtree_an
         'use_smart_exclude': False
     }
     out, _, _, _, _ = run_dirtree_and_capture(config)
-    
+
     assert_tree_contains(out, ["main.py", "helpers.py"])
     assert_tree_not_contains(out, ["test_main.py", "component.js", "data.json"])
 
@@ -134,7 +135,7 @@ def test_llm_export_large_file_handling_truncation(tmp_path, run_dirtree_and_cap
     root = tmp_path / "llm_size_test"
     small_content = "# Small file\n" + "s" * 100
     # Create a file slightly larger than 1KB to test truncation
-    large_content = "# Large file\n" + "l" * 1200 
+    large_content = "# Large file\n" + "l" * 1200
     (root / "small.py").write_text(small_content)
     (root / "large.py").write_text(large_content)
 
