@@ -6,317 +6,219 @@ from pathlib import Path
 import shutil
 
 # Use the conftest.py setup to ensure imports work
-from .conftest import COMMON_EXCLUDES, create_test_structure, run_dirtree_and_capture
+from .conftest import COMMON_DIR_EXCLUDES, create_test_structure, run_dirtree_and_capture # Updated import
 # Must import AFTER sys.path manipulation in conftest
 try:
     from dirtree_lib.dirtree_core import IntuitiveDirTree
-    from dirtree_lib.dirtree_filters import passes_filters, should_recurse_into
+    from dirtree_lib.dirtree_filters import passes_tree_filters, should_recurse_for_tree
     from dirtree_lib.dirtree_utils import log_message
 except ImportError:
      pytest.skip("Skipping edge case tests, import failed.", allow_module_level=True)
 
 
-# Helper functions from test_tree_generation.py
-def assert_lines_present(output, expected_lines):
-    """Assert that all expected lines are present in the output."""
-    for line in expected_lines:
-        assert line in output, f"Expected line '{line}' not found in output"
+# Helper functions for assertions (can be moved to a common test utils file if used more widely)
+def assert_tree_contains(output: str, items: List[str]):
+    """Asserts that all items are present in the tree output (ignoring exact prefixes)."""
+    missing = []
+    for item in items:
+        # A simple check, might need to be more robust for complex tree structures
+        if item not in output:
+            missing.append(item)
+    assert not missing, f"Tree output missing: {missing}.\nOutput:\n{output}"
 
+def assert_tree_not_contains(output: str, items: List[str]):
+    """Asserts that none of the items are present in the tree output."""
+    found = []
+    for item in items:
+        if item in output:
+            found.append(item)
+    assert not found, f"Tree output unexpectedly contains: {found}.\nOutput:\n{output}"
 
-def assert_lines_absent(output, absent_lines):
-    """Assert that none of the specified lines are present in the output."""
-    present = []
-    for line in absent_lines:
-        if line in output:
-            present.append(line)
+def read_llm_export_content(export_file_path: Path) -> str:
+    if not export_file_path or not export_file_path.is_file():
+        pytest.fail(f"LLM Export file not found or invalid: {export_file_path}")
+    return export_file_path.read_text(encoding='utf-8')
 
-    found_count = len(present)
-    assert found_count == 0, \
-        f"Unexpected lines found: {present}\nFull Output:\n{output}"
+# === Complex Filtering Tests (for Tree Display) ===
 
-
-# === Complex Filtering Tests ===
-
-def test_complex_pattern_interactions(base_test_structure, run_dirtree_and_capture):
-    """Test complex interactions between include and exclude patterns."""
+def test_complex_cli_pattern_interactions_for_tree(base_test_structure, run_dirtree_and_capture):
+    """Test complex interactions between CLI include and exclude patterns for tree display."""
     root_dir = base_test_structure
 
-    # Test case: Include *.py but exclude test_*.py
+    # Test case: Include *.py but CLI exclude test_*.py
     config = {
-        'root_dir': root_dir,
-        'include_patterns': ["*.py"],
-        'exclude_patterns': ["test_*.py"],
+        'root_dir': str(root_dir),
+        'cli_include_patterns': ["*.py"],
+        'cli_exclude_patterns': ["test_*.py"],
+        'use_smart_exclude': False # Simplify by turning off smart excludes
+    }
+    out, _, _, _, _ = run_dirtree_and_capture(config)
+
+    assert_tree_contains(out, ["main.py", "helpers.py"]) # From src/ and src/utils/
+    assert_tree_not_contains(out, ["test_main.py", "test_helpers.py"]) # Excluded by CLI pattern
+
+    # Test case: CLI Include *.py, CLI exclude src/utils directory
+    config = {
+        'root_dir': str(root_dir),
+        'cli_include_patterns': ["*.py"],
+        'cli_exclude_patterns': ["src/utils"], # Exclude the directory by name/path
         'use_smart_exclude': False
     }
-    out, err, tree_lines, _, _ = run_dirtree_and_capture(config)
+    out, _, _, _, _ = run_dirtree_and_capture(config)
+    
+    assert_tree_contains(out, ["main.py", "test_main.py", "test_helpers.py"]) # test_*.py are still .py files
+    assert_tree_not_contains(out, ["src/utils", "helpers.py"]) # helpers.py is inside excluded src/utils
 
-    # Should include main.py and helpers.py but not test_*.py files
-    assert_lines_present(out, ["main.py"])
-    assert "helpers.py" in out  # Just check it's somewhere in the output
-    assert_lines_absent(out, ["test_main.py", "test_helpers.py"])
-
-    # Test case: Include both *.py and test_*.py but exclude src/utils directory
-    config = {
-        'root_dir': root_dir,
-        'include_patterns': ["*.py", "test_*.py"],
-        'exclude_patterns': ["src/utils"],  # Exclude the directory itself
-        'use_smart_exclude': False
-    }
-    out, err, tree_lines, _, _ = run_dirtree_and_capture(config)
-
-    # Should include main.py and test_*.py but not utils directory
-    assert_lines_present(out, ["main.py", "test_main.py", "test_helpers.py"])
-    assert "utils" not in out or ("utils" in out and "helpers.py" not in out)
-
-
-def test_nested_include_exclude_patterns(base_test_structure, run_dirtree_and_capture):
-    """Test nested directory patterns with includes and excludes."""
+def test_nested_cli_include_exclude_for_tree(base_test_structure, run_dirtree_and_capture):
     root_dir = base_test_structure
 
-    # Include only .py files in src directory
+    # Include only .py files in src directory using CLI include
     config = {
-        'root_dir': root_dir,
-        'include_patterns': ["src/*.py"],
-        'exclude_patterns': [],
+        'root_dir': str(root_dir),
+        'cli_include_patterns': ["src/**/*.py"], # Recursive include within src
         'use_smart_exclude': False
     }
-    out, err, tree_lines, _, _ = run_dirtree_and_capture(config)
-
-    # Should include main.py but not test_*.py or other files
-    assert_lines_present(out, ["main.py"])
-    assert_lines_absent(out, ["test_main.py", "test_helpers.py", "component.js"])
-
-    # Include only files in tests directory
-    config = {
-        'root_dir': root_dir,
-        'include_patterns': ["tests/*.py"],
-        'exclude_patterns': [],
-        'use_smart_exclude': False
-    }
-    out, err, tree_lines, _, _ = run_dirtree_and_capture(config)
-
-    # Should include only test files
-    assert_lines_present(out, ["tests", "test_main.py", "test_helpers.py"])
-    # We don't check for absence of main.py here as it might appear in the directory structure
-    # even if it's not included in the filtering
+    out, _, _, _, _ = run_dirtree_and_capture(config)
+    
+    assert_tree_contains(out, ["main.py", "helpers.py"])
+    assert_tree_not_contains(out, ["test_main.py", "component.js", "data.json"])
 
 
-# === Path Normalization Tests ===
-
-def test_path_normalization(base_test_structure, run_dirtree_and_capture):
-    """Test that path normalization works correctly for filtering."""
+# === Path Normalization Tests === (Mainly for CLI patterns)
+def test_path_normalization_cli_patterns(base_test_structure, run_dirtree_and_capture):
     root_dir = base_test_structure
-
-    # Test with Windows-style paths in patterns - exclude all .py files
+    # Exclude all .py files using a simple pattern
     config = {
-        'root_dir': root_dir,
-        'exclude_patterns': ["*.py"],  # Simple pattern
+        'root_dir': str(root_dir),
+        'cli_exclude_patterns': ["*.py"],
         'use_smart_exclude': False
     }
-    out, err, tree_lines, _, _ = run_dirtree_and_capture(config)
-
-    # Should exclude all .py files
-    assert "main.py" not in out
-    assert "helpers.py" not in out
-    assert "test_main.py" not in out
-
-    # Test with Unix-style paths in patterns - exclude all .js files
-    config = {
-        'root_dir': root_dir,
-        'exclude_patterns': ["*.js"],  # Simple pattern
-        'use_smart_exclude': False
-    }
-    out, err, tree_lines, _, _ = run_dirtree_and_capture(config)
-
-    # Should exclude all .js files
-    assert "component.js" not in out
-    assert "index.js" not in out
-    assert "main.js" not in out
+    out, _, _, _, _ = run_dirtree_and_capture(config)
+    assert_tree_not_contains(out, ["main.py", "helpers.py", "test_main.py"])
 
 
 # === Error Handling Tests ===
-
 def test_error_handling_during_traversal(tmp_path, monkeypatch, run_dirtree_and_capture):
-    """Test handling of errors during directory traversal."""
-    # Create a test structure
-    root = tmp_path / "error_test"
-    root.mkdir()
-    (root / "normal_dir").mkdir()
+    root = tmp_path / "error_test_root"
+    (root / "normal_dir").mkdir(parents=True, exist_ok=True)
+    (root / "problem_dir").mkdir(exist_ok=True) # This dir will cause scandir error
     (root / "normal_file.txt").write_text("content")
 
-    # Mock os.scandir to raise an error for a specific directory
     original_scandir = os.scandir
-
-    def mock_scandir(path):
-        if str(path).endswith("normal_dir"):
-            raise PermissionError("Mock permission denied")
-        return original_scandir(path)
-
+    def mock_scandir(path_arg):
+        if Path(path_arg).name == "problem_dir":
+            raise PermissionError("Mocked permission denied for problem_dir")
+        return original_scandir(path_arg)
     monkeypatch.setattr(os, "scandir", mock_scandir)
 
-    # Run with skip_errors=True
     config = {
-        'root_dir': root,
-        'skip_errors': True,
+        'root_dir': str(root),
+        'skip_errors': True, # Auto-skip
         'interactive_prompts': False
     }
+    out, err, _, _, _ = run_dirtree_and_capture(config)
 
-    # Should complete without raising an exception
-    out, err, tree_lines, _, _ = run_dirtree_and_capture(config)
+    assert_tree_contains(out, ["error_test_root", "normal_file.txt", "normal_dir"])
+    # Check for error message related to problem_dir in the tree output
+    assert "problem_dir" in out # The directory itself might be listed
+    assert "Error listing directory" in out or "! Error" in out # Error message should appear
 
-    # The root and normal_file should be in the output
-    assert "error_test" in out
-    assert "normal_file.txt" in out
-    # The error directory should be marked with an error message
-    assert "Error listing directory:" in out
-
-
-def test_nonexistent_path_handling(tmp_path):
-    """Test handling of paths that don't exist."""
-    # Create a tree with a non-existent path
-    non_existent = tmp_path / "does_not_exist"
-
-    # This should raise a FileNotFoundError
+def test_nonexistent_root_path_handling(tmp_path):
+    non_existent_root = tmp_path / "does_not_exist"
     with pytest.raises(FileNotFoundError):
-        tree = IntuitiveDirTree(
-            root_dir=str(non_existent),
-            skip_errors=True,
-            interactive_prompts=False
-        )
+        IntuitiveDirTree(root_dir=str(non_existent_root))
 
 
 # === LLM Export Edge Cases ===
+def test_llm_export_large_file_handling_truncation(tmp_path, run_dirtree_and_capture):
+    root = tmp_path / "llm_size_test"
+    small_content = "# Small file\n" + "s" * 100
+    # Create a file slightly larger than 1KB to test truncation
+    large_content = "# Large file\n" + "l" * 1200 
+    (root / "small.py").write_text(small_content)
+    (root / "large.py").write_text(large_content)
 
-def read_llm_export(export_file):
-    """Helper to read LLM export file content."""
-    with open(export_file, 'r', encoding='utf-8') as f:
-        return f.read()
-
-
-def test_llm_export_large_file_handling(tmp_path, run_dirtree_and_capture):
-    """Test LLM export handling of files at the size limit."""
-    # Create a test structure with a file exactly at the size limit
-    root = tmp_path / "size_test"
-    root.mkdir()
-
-    # Create a 5KB file (well under limit)
-    small_file = root / "small.py"
-    small_file.write_text("# " + "x" * 5000)
-
-    # Create a 101KB file (just over default limit)
-    large_file = root / "large.py"
-    large_file.write_text("# " + "x" * 101000)
+    max_size_for_llm = 1024 # 1KB limit
 
     config = {
-        'root_dir': root,
-        'export_for_llm': True,
-        'output_dir': str(tmp_path),
-        'max_llm_file_size': 100 * 1024,  # Use default 100KB limit
+        'root_dir': str(root),
+        'export_for_llm': True, 'output_dir': str(tmp_path),
+        'max_llm_file_size': max_size_for_llm,
+        'use_smart_exclude': False # To ensure files are considered
     }
+    out, _, _, _, export_file_path = run_dirtree_and_capture(config)
+    assert export_file_path is not None
+    llm_content = read_llm_export_content(export_file_path)
 
-    out, err, tree_lines, _, export_file = run_dirtree_and_capture(config)
-    content = read_llm_export(export_file)
+    assert "### `small.py`" in llm_content
+    assert small_content in llm_content
+    assert "... [TRUNCATED]" not in llm_content.split("### `small.py`")[1].split("###")[0] # Not truncated
 
-    # Small file should be included in full
-    assert "### `small.py`" in content
-    assert "# " + "x" * 5000 in content
-
-    # Large file should be included but might be truncated
-    # We'll check if it's there and has content
-    assert "### `large.py`" in content
-    assert "#" in content  # Should have some content
-
-    # Check if the file is truncated (it should be)
-    if "[TRUNCATED]" in content:
-        # If truncated, full content should not be there
-        assert "# " + "x" * 101000 not in content
+    assert "### `large.py`" in llm_content
+    assert large_content[:max_size_for_llm] in llm_content # Start of content should be there
+    assert "... [TRUNCATED]" in llm_content # Truncation marker should be present
+    assert large_content[max_size_for_llm+100:] not in llm_content # End of original content should not be
 
 
-# === Binary File Detection Tests ===
-
-def test_binary_file_detection(tmp_path, run_dirtree_and_capture):
-    """Test correct detection and handling of binary files in LLM export."""
-    # Create a test structure with text and binary files
-    root = tmp_path / "binary_test"
-    root.mkdir()
-
-    # Create a text file
-    text_file = root / "text.txt"
-    text_file.write_text("This is text content")
-
-    # Create a file with binary content
-    binary_file = root / "binary.dat"
-    binary_file.write_bytes(bytes(range(256)))
-
-    # Create a file with .py extension but binary content
-    sneaky_binary = root / "sneaky.py"
-    sneaky_binary.write_bytes(bytes(range(128, 256)))
+def test_llm_export_binary_file_handling(tmp_path, run_dirtree_and_capture):
+    root = tmp_path / "llm_binary_test"
+    (root / "text_file.txt").write_text("This is definitely text.")
+    (root / "image.png").write_bytes(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR...') # PNG magic bytes
+    (root / "script.py").write_text("print('hello')") # Text file with code extension
+    (root / "binary_as_py.py").write_bytes(b'\x00\x01\x02\x80\x90\xff') # Binary content, code extension
 
     config = {
-        'root_dir': root,
-        'export_for_llm': True,
-        'output_dir': str(tmp_path),
+        'root_dir': str(root),
+        'export_for_llm': True, 'output_dir': str(tmp_path),
+        'use_smart_exclude': False,
+        'llm_content_extensions': None # Use default logic (include text, exclude binary)
     }
+    out, _, _, _, export_file_path = run_dirtree_and_capture(config)
+    assert export_file_path is not None
+    llm_content = read_llm_export_content(export_file_path)
 
-    out, err, tree_lines, _, export_file = run_dirtree_and_capture(config)
-    content = read_llm_export(export_file)
+    assert "### `text_file.txt`" in llm_content
+    assert "This is definitely text." in llm_content
 
-    # Text file should be included
-    assert "### `text.txt`" in content
-    assert "This is text content" in content
+    assert "### `script.py`" in llm_content
+    assert "print('hello')" in llm_content
 
-    # Binary file with binary extension should be excluded
-    assert "### `binary.dat`" not in content
+    assert "### `image.png`" not in llm_content # Binary extension, should be excluded by default
 
-    # Binary file with .py extension should be handled appropriately
-    # This might be included with replacement characters or excluded
-    # The test should verify the actual behavior
-    if "### `sneaky.py`" in content:
-        # If included, it should have some content (we don't check for specific characters
-        # as they might be rendered differently in different environments)
-        assert "sneaky.py" in content
-    else:
-        # If excluded, it should not be in the content
-        assert "### `sneaky.py`" not in content
+    # binary_as_py.py: extension .py is in DEFAULT_LLM_INCLUDE_EXTENSIONS.
+    # read_file_content will attempt to decode it, possibly with replacements.
+    assert "### `binary_as_py.py`" in llm_content
+    # We expect some representation of the (replaced) binary data
+    assert "\x00\x01\x02" not in llm_content # Original bytes likely not present as string
+    assert "�����" in llm_content or "���" in llm_content # Check for replacement characters or similar
 
 
-def test_encoding_edge_cases(tmp_path, run_dirtree_and_capture):
-    """Test handling of files with different encodings."""
-    # Create a test structure with files in different encodings
-    root = tmp_path / "encoding_test"
-    root.mkdir()
-
-    # Create a UTF-8 file with non-ASCII characters
-    utf8_file = root / "utf8.txt"
-    utf8_file.write_text("UTF-8 text with unicode: 你好, こんにちは, Привет", encoding="utf-8")
-
-    # Create a Latin-1 file
-    latin1_file = root / "latin1.txt"
-    latin1_file.write_text("Latin-1 text with special chars: é è ç à ù", encoding="latin-1")
-
-    # Create a file with invalid UTF-8 sequences
-    invalid_file = root / "invalid.txt"
-    with open(invalid_file, 'wb') as f:
-        f.write(b"Invalid UTF-8 sequence: \xff\xfe\xfd")
+def test_llm_export_encoding_edge_cases(tmp_path, run_dirtree_and_capture):
+    root = tmp_path / "llm_encoding_test"
+    utf8_text = "UTF-8 text with unicode: 你好, こんにちは, Привет"
+    latin1_text = "Latin-1 text with special chars: é è ç à ù"
+    (root / "utf8_doc.txt").write_text(utf8_text, encoding="utf-8")
+    (root / "latin1_doc.txt").write_text(latin1_text, encoding="latin-1")
+    # File with mixed valid UTF-8 and some bytes that are invalid UTF-8
+    (root / "mixed_invalid_utf8.txt").write_bytes(b"Valid start \xe4\xa2\x8a then invalid \xff\xfe sequence.")
 
     config = {
-        'root_dir': root,
-        'export_for_llm': True,
-        'output_dir': str(tmp_path),
+        'root_dir': str(root),
+        'export_for_llm': True, 'output_dir': str(tmp_path),
+        'use_smart_exclude': False
     }
+    out, _, _, _, export_file_path = run_dirtree_and_capture(config)
+    assert export_file_path is not None
+    llm_content = read_llm_export_content(export_file_path)
 
-    out, err, tree_lines, _, export_file = run_dirtree_and_capture(config)
-    content = read_llm_export(export_file)
+    assert "### `utf8_doc.txt`" in llm_content
+    assert utf8_text in llm_content
 
-    # UTF-8 file should be included correctly
-    assert "### `utf8.txt`" in content
-    assert "UTF-8 text with unicode: 你好, こんにちは, Привет" in content
+    assert "### `latin1_doc.txt`" in llm_content
+    assert latin1_text in llm_content # read_file_content tries latin-1 as fallback
 
-    # Latin-1 file should be handled
-    assert "### `latin1.txt`" in content
-    assert "Latin-1 text with special chars:" in content
-
-    # Invalid file should be handled gracefully (either included with replacements or excluded)
-    if "### `invalid.txt`" in content:
-        # Should not crash and should have some content
-        assert "Invalid UTF-8 sequence:" in content
+    assert "### `mixed_invalid_utf8.txt`" in llm_content
+    assert "Valid start 你" in llm_content # Check if valid part decoded
+    assert "sequence." in llm_content # Check if end part is there
+    # Invalid bytes \xff\xfe should be replaced by � (U+FFFD)
+    assert "�" in llm_content # Check for replacement character

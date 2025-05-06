@@ -7,7 +7,7 @@ from the final tree based on patterns and settings.
 import fnmatch
 import re
 from pathlib import Path
-from typing import List, Optional, Callable, Set, Dict, Any, Pattern
+from typing import List, Optional, Callable, Set, Dict, Any, Pattern, Tuple
 
 # Regex patterns for complex pattern matching
 _COMPILED_REGEX_CACHE: Dict[str, Pattern[str]] = {}
@@ -17,189 +17,205 @@ def _compile_pattern(pattern: str) -> Pattern[str]:
     if pattern in _COMPILED_REGEX_CACHE:
         return _COMPILED_REGEX_CACHE[pattern]
 
-    # Handle special ** glob pattern for recursive matches
     if '**' in pattern:
-        # Convert ** to a regex that matches any number of path segments
-        regex_pattern = fnmatch.translate(pattern).replace('.*.*', '.*')
+        regex_pattern = fnmatch.translate(pattern).replace(re.escape(Path('**').as_posix()), '.*') # More robust **
     else:
         regex_pattern = fnmatch.translate(pattern)
+    
+    # Ensure regex matches whole path segments for directory names unless wildcarded
+    if not any(c in pattern for c in ['*', '?', '[']):
+        # For plain names, ensure it matches a full segment or end of path
+        # e.g., 'node_modules' should match 'node_modules' or 'path/node_modules'
+        # not 'my_node_modules_project'
+        # This is complex to do perfectly with fnmatch.translate alone.
+        # The current logic of checking name and relative_path separately handles this.
+        pass
+
 
     compiled = re.compile(regex_pattern)
     _COMPILED_REGEX_CACHE[pattern] = compiled
     return compiled
 
-def passes_filters(
+def _is_path_or_parent_excluded_by_patterns(
+    path: Path, root_dir: Path, patterns: List[str], log_func: Callable
+) -> Tuple[bool, Optional[str]]:
+    """Checks if path or any parent (up to root_dir) matches exclude patterns."""
+    if not patterns:
+        return False, None
+
+    current = path
+    while current != root_dir and current.parent != current: # Stop if we reach root or above
+        relative_to_root = current.relative_to(root_dir).as_posix()
+        for pattern_str in patterns:
+            regex = _compile_pattern(pattern_str)
+            # Check against current segment name
+            if regex.fullmatch(current.name): # Use fullmatch for exact segment name
+                log_func(f"Path '{path}' (via segment '{current.name}') excluded by CLI pattern '{pattern_str}'", "debug")
+                return True, f"segment '{current.name}' excluded by CLI pattern '{pattern_str}'"
+            # Check against relative path from root
+            if regex.fullmatch(relative_to_root): # Use fullmatch for paths
+                log_func(f"Path '{path}' (relative path '{relative_to_root}') excluded by CLI pattern '{pattern_str}'", "debug")
+                return True, f"relative path '{relative_to_root}' excluded by CLI pattern '{pattern_str}'"
+        if current == root_dir: # Avoid going above root
+            break
+        current = current.parent
+    return False, None
+
+
+def passes_tree_filters(
     path: Path,
     root_dir: Path,
-    patterns_to_include: List[str],
-    patterns_to_exclude: List[str],
+    cli_include_patterns: List[str],
+    cli_exclude_patterns: List[str],
+    smart_dir_excludes_for_tree: List[str], # Only dir patterns from smart exclude
     show_hidden: bool,
-    log_func: Optional[Callable] = None, # Optional logging function
-    is_recursion_check: bool = False # Flag to indicate if we're checking for recursion
-) -> bool:
+    log_func: Callable
+) -> Tuple[bool, Optional[str]]: # Returns (passes, reason_if_failed)
     """
-    Checks if a path passes the final filtering rules for display in the tree.
+    Checks if a path should appear in the tree display.
 
     Args:
         path: The Path object to check.
         root_dir: The root directory of the tree generation.
-        patterns_to_include: List of glob patterns for files to include.
-        patterns_to_exclude: List of glob patterns for files/dirs to exclude.
-        show_hidden: Whether to show hidden files/directories (starting with '.').
-        log_func: Optional function for logging filter decisions.
-        is_recursion_check: If True, we're checking whether to recurse into this directory.
+        cli_include_patterns: Glob patterns from --include.
+        cli_exclude_patterns: Glob patterns from --exclude.
+        smart_dir_excludes_for_tree: Directory names/patterns from smart exclude (e.g., "node_modules").
+        show_hidden: Whether to show hidden files/directories.
+        log_func: Logging function.
 
     Returns:
-        True if the item should be listed, False otherwise.
+        Tuple (bool, Optional[str]): (True if item should be listed, Reason if False else None)
     """
     name = path.name
     is_root = (path == root_dir)
-    relative_path_str = None
-
-    # Helper for logging
-    def _log(msg, level="debug"):
-        if log_func:
-            log_func(msg, level)
+    relative_path_str = path.relative_to(root_dir).as_posix() if path != root_dir else "."
 
     # 1. Handle Hidden Files/Directories
     if not show_hidden and name.startswith(".") and not is_root:
-        _log(f"Filter: Excluding hidden item '{name}'")
+        return False, "hidden item"
+
+    # 2. Check CLI --exclude patterns (strongest exclusion for tree)
+    for pattern_str in cli_exclude_patterns:
+        regex = _compile_pattern(pattern_str)
+        if regex.fullmatch(name) or (relative_path_str != "." and regex.fullmatch(relative_path_str)):
+            return False, f"matches CLI exclude pattern '{pattern_str}'"
+    
+    # Check if any parent is CLI excluded (only for items inside such dirs)
+    # This is complex as `path` could be a dir itself.
+    # If path is 'a/b/c' and 'a/b' is CLI excluded, then 'a/b/c' shouldn't appear.
+    # This logic needs to be woven into the recursive build or `should_recurse_for_tree`.
+    # For `passes_tree_filters` on an individual item, if its parent was CLI_EXCLUDED and thus not recursed, this item wouldn't even be checked.
+    # So, we only need to check the item itself against CLI_EXCLUDE here.
+
+    # 3. Check if inside a Smart Excluded Directory (e.g. file inside node_modules)
+    # This prevents contents of smart_excluded_dirs from appearing.
+    # The smart_excluded_dir itself will pass this check but fail `should_recurse_for_tree`.
+    current_check_path = path.parent
+    while current_check_path != root_dir and current_check_path.parent != current_check_path :
+        for smart_pattern in smart_dir_excludes_for_tree:
+            # Smart patterns are typically names like "node_modules"
+            if fnmatch.fnmatch(current_check_path.name, smart_pattern):
+                 return False, f"inside Smart Excluded directory '{current_check_path.name}' (matches '{smart_pattern}')"
+        if current_check_path == root_dir: break
+        current_check_path = current_check_path.parent
+
+
+    # 4. Handle CLI --include patterns
+    # If --include is used, an item must match one of them (or be a necessary parent dir).
+    # This logic is tricky for a simple filter function. Usually, if includes are present,
+    # only explicitly included items and their ancestors are shown.
+    # The main recursion loop often handles building up parent dirs.
+    # For this filter: if includes are given, the item itself must match.
+    if cli_include_patterns:
+        matched_include = False
+        for pattern_str in cli_include_patterns:
+            regex = _compile_pattern(pattern_str)
+            if regex.fullmatch(name) or (relative_path_str != "." and regex.fullmatch(relative_path_str)):
+                matched_include = True
+                break
+        if not matched_include and not path.is_dir(): # Files must match if includes are present
+            return False, "does not match any CLI include pattern"
+        # For directories, they can pass if they don't match, to allow children to match.
+        # The final pruning of empty included dirs happens in the tree builder.
+
+    return True, None
+
+
+def should_recurse_for_tree(
+    dir_path: Path,
+    root_dir: Path,
+    cli_include_patterns: List[str],
+    cli_exclude_patterns: List[str],
+    smart_dir_excludes_for_tree: List[str],
+    show_hidden: bool,
+    log_func: Callable
+) -> bool:
+    """
+    Determines if the tree generator should recurse into this directory for tree display.
+    """
+    if not dir_path.is_dir(): # Should not happen if called correctly
         return False
 
-    # 2. Get relative path for pattern matching
-    try:
-        # Use Path.relative_to for robust relative path calculation
-        relative_path = path.relative_to(root_dir)
-        # Convert to string with forward slashes for consistent matching across OS
-        relative_path_str = relative_path.as_posix()
-    except ValueError:
-        # This can happen if path is not under root_dir (e.g., symlink target outside)
-        # Fallback to using just the name for matching in this edge case
-        relative_path_str = name
-        _log(f"Filter: Path '{path}' not relative to root '{root_dir}', using name '{name}' for matching.", "warning")
+    name = dir_path.name
+    relative_path_str = dir_path.relative_to(root_dir).as_posix() if dir_path != root_dir else "."
 
-    # 3. Check for recursion into excluded directories
-    if is_recursion_check and path.is_dir():
-        # Special case: always allow recursion into the root directory
-        if is_root:
-            return True
+    # 1. Don't recurse into hidden directories if not showing hidden
+    if not show_hidden and name.startswith(".") and dir_path != root_dir:
+        log_func(f"Tree Recurse: NO into '{name}' (hidden)", "debug")
+        return False
 
-        for pattern in patterns_to_exclude:
-            regex = _compile_pattern(pattern)
-
-            # For directories, we want to block recursion but still show the directory itself
-            # Use search() instead of match() to find the pattern anywhere in the string, not just at the beginning
-            if (regex.search(name) is not None) or (relative_path_str and regex.search(relative_path_str) is not None):
-                _log(f"Filter: Blocking recursion into '{relative_path_str}' (matches exclude pattern: '{pattern}')")
-                return False
-        # If we're just checking recursion and it passed, allow it
-        return True
-
-    # 4. For normal display filtering (not recursion check):
-    # Files are always subject to include/exclude patterns
-    # Directories are included by default, but their contents may be filtered
-
-    # Check exclusions first for both files and directories
-    for pattern in patterns_to_exclude:
-        regex = _compile_pattern(pattern)
-
-        # Check if the pattern matches the path name or any parent directory
-        if (regex.search(name) is not None):
-            _log(f"Filter: Excluding '{relative_path_str}' (name matches exclude pattern: '{pattern}')")
+    # 2. Don't recurse if directory matches a CLI --exclude pattern
+    for pattern_str in cli_exclude_patterns:
+        regex = _compile_pattern(pattern_str)
+        if regex.fullmatch(name) or (relative_path_str != "." and regex.fullmatch(relative_path_str)):
+            log_func(f"Tree Recurse: NO into '{name}' (matches CLI exclude '{pattern_str}')", "debug")
             return False
 
-        # Special handling for .git and other hidden directories
-        if name.startswith('.') and path.is_dir() and not show_hidden:
-            _log(f"Filter: Excluding hidden directory '{name}'")
+    # 3. Don't recurse if directory matches a Smart Directory Exclude pattern
+    # These are directories like "node_modules", ".git"
+    for smart_pattern in smart_dir_excludes_for_tree:
+        if fnmatch.fnmatch(name, smart_pattern): # Smart patterns are often simple names
+            log_func(f"Tree Recurse: NO into '{name}' (matches smart dir exclude '{smart_pattern}')", "debug")
             return False
+    
+    # 4. If CLI --include patterns are present, recursion logic is more complex.
+    #    We should recurse if the directory itself matches an include, OR
+    #    if any potential child could match an include pattern.
+    #    For simplicity here, if includes are present and the dir doesn't match,
+    #    we might still recurse, and let the `passes_tree_filters` for children handle it.
+    #    A more advanced version would prune branches that cannot lead to an included item.
+    #    If the dir itself matches an include, definitely recurse (if not excluded).
+    if cli_include_patterns:
+        matched_include = False
+        for pattern_str in cli_include_patterns:
+            regex = _compile_pattern(pattern_str)
+            # If dir matches an include, allow recursion unless excluded above.
+            if regex.fullmatch(name) or (relative_path_str != "." and regex.fullmatch(relative_path_str)):
+                matched_include = True
+                break
+            # If a pattern looks like it could match something *inside* this dir (e.g. "dir/*.py")
+            if pattern_str.startswith(relative_path_str + '/') or pattern_str.startswith(name + '/'):
+                matched_include = True # Potential for children to match
+                break
+        if not matched_include and relative_path_str != ".": # If root doesn't match, still scan its children
+            # If dir itself doesn't match any include pattern, and no pattern suggests children might,
+            # then don't recurse. This is a simplification.
+            # A true check would be too complex here.
+            # For now: if includes are specified, dir must match or have children that could.
+            # If dir itself doesn't match, we assume children might.
+            pass
 
-        # Check if the pattern matches the relative path
-        if relative_path_str:
-            # Special handling for **/__pycache__ pattern
-            if pattern == '**/__pycache__' and '__pycache__' in relative_path_str:
-                _log(f"Filter: Excluding '{relative_path_str}' (matches __pycache__ pattern)")
-                return False
 
-            # Special handling for directory patterns without wildcards
-            if '/' not in pattern and '*' not in pattern and path.is_file():
-                # For simple directory name patterns (like 'node_modules'), check if any parent dir matches
-                parent_parts = Path(relative_path_str).parts
-                if len(parent_parts) > 1 and pattern in parent_parts[:-1]:
-                    _log(f"Filter: Excluding '{relative_path_str}' (parent dir matches exclude pattern: '{pattern}')")
-                    return False
-
-            # Check the full path
-            if regex.search(relative_path_str) is not None:
-                _log(f"Filter: Excluding '{relative_path_str}' (path matches exclude pattern: '{pattern}')")
-                return False
-
-    # If it's a file, apply include patterns
-    if path.is_file():
-        # If include patterns are specified, file must match one of them
-        if patterns_to_include:
-            for pattern in patterns_to_include:
-                regex = _compile_pattern(pattern)
-
-                # Use search() instead of match() to find the pattern anywhere in the string, not just at the beginning
-                if (regex.search(name) is not None) or (relative_path_str and regex.search(relative_path_str) is not None):
-                    _log(f"Filter: Including file '{relative_path_str}' (matches include pattern: '{pattern}')")
-                    return True
-
-            # If no include pattern matched, exclude the file
-            _log(f"Filter: Excluding file '{relative_path_str}' (no include patterns matched)")
-            return False
-
-    # For directories, we always include them in the display, but may not recurse into them
-    # This ensures excluded dirs like node_modules show up in the tree
-
-    # 5. If it passed all checks (or is a directory), include it in display
-    _log(f"Filter: Allowing '{relative_path_str}' in tree display")
+    log_func(f"Tree Recurse: YES into '{name}'", "debug")
     return True
 
 
-def should_recurse_into(
-    path: Path,
-    root_dir: Path,
-    patterns_to_exclude: List[str],
-    show_hidden: bool,
-    log_func: Optional[Callable] = None
-) -> bool:
-    """
-    Determines if the directory tree generator should recurse into this directory.
-
-    Args:
-        path: The directory path to check
-        root_dir: The root directory of the tree
-        patterns_to_exclude: Exclude patterns to apply
-        show_hidden: Whether to show hidden files
-        log_func: Optional logging function
-
-    Returns:
-        True if we should recurse into directory, False otherwise
-    """
-    if not path.is_dir():
-        return False
-
-    # Use passes_filters with the recursion flag to determine if we should recurse
-    return passes_filters(
-        path, root_dir, [], patterns_to_exclude, show_hidden, log_func,
-        is_recursion_check=True
-    )
-
-
-def match_extension(path: Path, extensions: Set[str]) -> bool:
+def match_extension(path: Path, extensions_to_match: Set[str]) -> bool:
     """
     Check if a file matches any of the specified extensions.
-
-    Args:
-        path: The file path to check
-        extensions: Set of extensions (without dots) to match against
-
-    Returns:
-        True if the file extension is in the set, False otherwise
     """
     if not path.is_file():
         return False
-
-    ext = path.suffix.lower().lstrip(".")
-    return ext in extensions
+    # Extension without dot, lowercase
+    file_ext = path.suffix.lower().lstrip(".")
+    return file_ext in extensions_to_match

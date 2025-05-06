@@ -3,23 +3,21 @@ import pytest
 from pathlib import Path
 
 # Use the conftest.py setup to ensure imports work
-from .conftest import COMMON_EXCLUDES
+from .conftest import COMMON_DIR_EXCLUDES, COMMON_FILE_EXCLUDES # Updated
 # Must import AFTER sys.path manipulation in conftest
 try:
-    from dirtree_lib.dirtree_filters import passes_filters, should_recurse_into, _compile_pattern
+    from dirtree_lib.dirtree_filters import passes_tree_filters, should_recurse_for_tree, _compile_pattern
     from dirtree_lib.dirtree_utils import log_message
 except ImportError:
      pytest.skip("Skipping filtering logic tests, import failed.", allow_module_level=True)
 
 
-# Dummy logger
 def dummy_log(msg, level="debug"):
-    # print(f"LOG [{level}]: {msg}") # Uncomment for debugging tests
+    # print(f"LOG [{level.upper()}]: {msg}") # Uncomment for debugging filter tests
     pass
 
 @pytest.fixture
-def filter_test_structure(tmp_path):
-    """Specific structure for filter tests"""
+def filter_test_root(tmp_path):
     d = tmp_path / "filter_root"
     d.mkdir()
     (d / "file.py").touch()
@@ -29,120 +27,96 @@ def filter_test_structure(tmp_path):
     (d / "subdir" / "subfile.py").touch()
     (d / "subdir" / "another.log").touch()
     (d / ".hiddendir").mkdir()
-    (d / ".hiddendir" / "inside.txt").touch()
-    (d / "node_modules").mkdir()
+    (d / ".hiddendir" / "inside_hidden_dir.txt").touch()
+    (d / "node_modules").mkdir() # Smart Dir Exclude for tree
     (d / "node_modules" / "lib.js").touch()
-    (d / "exclude_me").mkdir()
-    (d / "exclude_me" / "important.dat").touch()
-    (d / "nested").mkdir()
-    (d / "nested" / "__pycache__").mkdir()
-    (d / "nested" / "__pycache__" / "cache.pyc").touch()
+    (d / "coverage").mkdir() # Example of an interactive LLM exclude dir
+    (d / "coverage" / "report.html").touch()
+    (d / "src").mkdir()
+    (d / "src" / "__pycache__").mkdir() # Smart Dir Exclude for tree
+    (d / "src" / "__pycache__" / "cache.pyc").touch()
+    (d / "src" / "main.ts").touch()
+    (d / "package-lock.json").touch() # Smart File Exclude for LLM
     return d
 
-# Test _compile_pattern helper (basic check)
-def test_compile_pattern():
-    regex = _compile_pattern("*.py")
-    assert regex.match("test.py")
-    assert not regex.match("test.pyc")
-    regex_nodemod = _compile_pattern("node_modules")
-    assert regex_nodemod.search("node_modules") # Use search as passes_filters does
-    assert regex_nodemod.search("path/to/node_modules")
-    regex_globstar = _compile_pattern("**/__pycache__")
-    # fnmatch.translate creates regex that needs to match full string typically,
-    # but our use in passes_filters uses search()
-    assert regex_globstar.search("nested/__pycache__")
-    assert regex_globstar.search("root/__pycache__")
+# === Tests for passes_tree_filters (determines if item *appears* in tree) ===
 
-# === Tests for passes_filters ===
-
-@pytest.mark.parametrize("path_name, show_hidden, expected", [
-    ("file.py", False, True),
-    ("file.txt", False, True),
-    (".hiddenfile", False, False),
-    (".hiddenfile", True, True),
-    ("subdir", False, True),
-    (".hiddendir", False, False),
-    (".hiddendir", True, True),
-    ("node_modules", False, True), # Should be listed by default if not excluded
-    ("__pycache__", False, True), # Should be listed by default if not excluded
+@pytest.mark.parametrize("path_name, show_hidden, expected_pass, expected_reason_contains", [
+    ("file.py", False, True, None),
+    (".hiddenfile", False, False, "hidden item"),
+    (".hiddenfile", True, True, None),
+    ("subdir", False, True, None),
+    (".hiddendir", False, False, "hidden item"),
+    (".hiddendir", True, True, None),
+    ("node_modules", False, True, None), # node_modules dir itself should pass to be shown as [excluded]
+    ("node_modules/lib.js", False, False, "inside Smart Excluded directory"), # Content inside should not pass
+    ("src/__pycache__", False, True, None), # __pycache__ dir itself should pass
+    ("src/__pycache__/cache.pyc", False, False, "inside Smart Excluded directory"),
+    ("coverage", False, True, None), # Interactively LLM excluded dirs still fully appear in tree
+    ("coverage/report.html", False, True, None),
 ])
-def test_passes_filters_hidden(filter_test_structure, path_name, show_hidden, expected):
-    root = filter_test_structure
+def test_passes_tree_filters_hidden_and_smart_dir_contents(filter_test_root, path_name, show_hidden, expected_pass, expected_reason_contains):
+    root = filter_test_root
     path = root / path_name
-    assert passes_filters(path, root, [], [], show_hidden, dummy_log) == expected
-
-@pytest.mark.parametrize("path_name, includes, excludes, expected", [
-    # No filters
-    ("file.py", [], [], True),
-    ("subdir", [], [], True),
-    # Simple include
-    ("file.py", ["*.py"], [], True),
-    ("file.txt", ["*.py"], [], False),
-    ("subdir", ["*.py"], [], True), # Dirs always pass if no exclude matches
-    ("subdir/subfile.py", ["*.py"], [], True), # Relative path check needed
-    # Simple exclude
-    ("file.py", [], ["*.py"], False),
-    ("file.txt", [], ["*.py"], True),
-    ("subdir", [], ["subdir"], False), # Exclude dir by name
-    ("subdir/subfile.py", [], ["subdir/*"], False), # Exclude dir content
-    ("subdir/subfile.py", [], ["*.py"], False), # Exclude file by ext
-    ("node_modules/lib.js", [], ["node_modules"], False), # Exclude node_modules content
-    ("node_modules", [], ["node_modules"], False), # Exclude node_modules dir itself
-    # Include + Exclude
-    ("file.py", ["*.py"], ["*.txt"], True),
-    ("file.txt", ["*.py"], ["*.txt"], False),
-    ("subdir/subfile.py", ["*.py"], ["subdir/*"], False), # Exclude takes precedence
-    ("subdir/another.log", ["*.py", "*.log"], ["*.log"], False), # Exclude takes precedence
-    # Path patterns
-    ("exclude_me/important.dat", [], ["exclude_me/*"], False),
-    ("exclude_me", [], ["exclude_me"], False),
-    ("nested/__pycache__/cache.pyc", [], ["**/__pycache__"], False),
-    ("nested/__pycache__", [], ["**/__pycache__"], False), # Directory itself matches
-])
-def test_passes_filters_patterns(filter_test_structure, path_name, includes, excludes, expected):
-    root = filter_test_structure
-    path = root / path_name
-    # Ensure intermediate dirs exist if testing nested paths
     path.parent.mkdir(parents=True, exist_ok=True)
-    if '.' in path.name and not path.exists(): # Create file if not exists
-        path.touch()
-    elif '.' not in path.name and not path.exists(): # Create dir if not exists
-         path.mkdir()
+    if '.' in path.name and not path.exists(): path.touch() # Create file if not a dir
+    elif not path.exists(): path.mkdir(exist_ok=True) # Create dir
 
-    # Test filtering directly
-    assert passes_filters(path, root, includes, excludes, True, dummy_log) == expected
+    # Smart excludes for tree (only dir part)
+    smart_dir_tree_excludes = COMMON_DIR_EXCLUDES 
 
+    passes, reason = passes_tree_filters(path, root, [], [], smart_dir_tree_excludes, show_hidden, dummy_log)
+    assert passes == expected_pass
+    if not expected_pass and expected_reason_contains:
+        assert reason is not None and expected_reason_contains in reason
 
-# === Tests for should_recurse_into ===
-
-@pytest.mark.parametrize("dir_name, excludes, show_hidden, expected", [
-    # Basic cases
-    ("subdir", [], False, True),
-    (".hiddendir", [], False, False), # Don't recurse into hidden if show_hidden=False
-    (".hiddendir", [], True, True),  # Recurse into hidden if show_hidden=True
-    # Common excludes (simulate smart exclude)
-    ("node_modules", COMMON_EXCLUDES, False, False),
-    ("__pycache__", COMMON_EXCLUDES, False, False),
-    (".git", COMMON_EXCLUDES, True, False), # Even if show_hidden=True, exclude pattern matches
-    # Manual excludes
-    ("subdir", ["subdir"], False, False), # Exclude by name
-    ("exclude_me", ["exclude_me"], False, False),
-    ("nested/__pycache__", ["**/__pycache__"], False, False), # Globstar exclude
-    # Non-matching excludes
-    ("subdir", ["other_dir"], False, True),
-    ("node_modules", ["*.js"], False, True), # Pattern doesn't match dir name/path
+@pytest.mark.parametrize("path_name, cli_includes, cli_excludes, expected_pass, reason_contains", [
+    ("file.py", [], [], True, None),
+    ("file.py", [], ["*.py"], False, "matches CLI exclude pattern '*.py'"),
+    ("file.txt", ["*.py"], [], False, "does not match any CLI include pattern"), # file.txt is not .py
+    ("file.py", ["*.py"], [], True, None),
+    ("subdir/subfile.py", ["*.py"], ["subdir/*"], False, "matches CLI exclude pattern 'subdir/*'"), # subfile.py is under subdir/
+    ("subdir", [], ["subdir"], False, "matches CLI exclude pattern 'subdir'"), # Exclude dir by name
+    ("src/main.ts", ["src/*.ts"], [], True, None),
+    ("src/main.ts", ["src/*.js"], [], False, "does not match"),
 ])
-def test_should_recurse_into(filter_test_structure, dir_name, excludes, show_hidden, expected):
-    root = filter_test_structure
-    path = root / dir_name
+def test_passes_tree_filters_cli_patterns(filter_test_root, path_name, cli_includes, cli_excludes, expected_pass, reason_contains):
+    root = filter_test_root
+    path = root / path_name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if '.' in path.name and not path.exists(): path.touch()
+    elif not path.exists(): path.mkdir(exist_ok=True)
+    
+    passes, reason = passes_tree_filters(path, root, cli_includes, cli_excludes, [], True, dummy_log)
+    assert passes == expected_pass
+    if not expected_pass and reason_contains:
+        assert reason is not None and reason_contains in reason
 
-    # Ensure directory exists for the test
+
+# === Tests for should_recurse_for_tree (determines if tree builder descends) ===
+
+@pytest.mark.parametrize("dir_name, cli_excludes, smart_dir_tree_excludes, show_hidden, expected_recurse", [
+    ("subdir", [], [], False, True),
+    (".hiddendir", [], [], False, False), # No recurse if hidden and not show_hidden
+    (".hiddendir", [], [], True, True),   # Recurse if hidden and show_hidden
+    ("node_modules", [], COMMON_DIR_EXCLUDES, False, False), # No recurse due to smart exclude
+    ("src/__pycache__", [], COMMON_DIR_EXCLUDES, False, False), # No recurse due to smart exclude
+    ("coverage", [], [], False, True), # Interactively LLM excluded dir: YES recurse for tree
+    ("subdir", ["subdir"], [], False, False), # No recurse due to CLI exclude
+    ("subdir", ["otherdir"], [], False, True),
+])
+def test_should_recurse_for_tree_logic(filter_test_root, dir_name, cli_excludes, smart_dir_tree_excludes, show_hidden, expected_recurse):
+    root = filter_test_root
+    path = root / dir_name
     path.mkdir(exist_ok=True)
 
-    assert should_recurse_into(path, root, excludes, show_hidden, dummy_log) == expected
+    # cli_includes are not directly used by should_recurse_for_tree in the simplified model,
+    # recursion happens and then children are filtered by passes_tree_filters.
+    # A more complex pruning based on includes could be added but is not current.
+    cli_includes = [] 
+    
+    assert should_recurse_for_tree(path, root, cli_includes, cli_excludes, smart_dir_tree_excludes, show_hidden, dummy_log) == expected_recurse
 
-# Test edge case: root dir itself should always allow recursion start
-def test_should_recurse_into_root(filter_test_structure):
-    root = filter_test_structure
-    assert should_recurse_into(root, root, COMMON_EXCLUDES, False, dummy_log) == True
-    assert should_recurse_into(root, root, ["*"], False, dummy_log) == True # Even if excluded? Yes, start point.
+def test_should_recurse_for_tree_root_dir(filter_test_root):
+    # Root directory itself should always allow initial recursion regardless of excludes
+    assert should_recurse_for_tree(filter_test_root, filter_test_root, [], ["*"], [], False, dummy_log) == True

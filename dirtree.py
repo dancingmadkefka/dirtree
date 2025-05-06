@@ -1,62 +1,45 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
-IntuitiveDirTree - A User-Friendly Directory Tree Printer with LLM Export
-
-Version: 2.3.0
+IntuitiveDirTree - A User-Friendly Directory Tree Visualizer with LLM Export
 
 This script generates a tree representation of a directory structure with advanced
 filtering options and can export file content in a format suitable for Large Language Models.
-
-Features:
-- Interactive directory and filter selection
-- Customizable tree styles and visualization options
-- Smart exclusion of common directories like .git, node_modules, etc.
-- LLM-friendly export with file content
-- Support for multiple output formats and styles
-
-Usage:
-    python dirtree.py [directory] [options]
-    python dirtree.py -i  # For interactive setup (recommended)
-    python dirtree.py -h  # For help on all options
 """
 
 import sys
 from pathlib import Path
 
-# Ensure the 'dirtree_lib' directory is in the Python path
-# This allows running the script directly from its location
-script_dir = Path(__file__).parent.resolve()
-lib_dir = script_dir / 'dirtree_lib'
+# Ensure 'dirtree_lib' is in sys.path for correct module resolution.
+# This handles running the script from various locations (e.g., project root, or if installed).
+script_dir = Path(__file__).resolve().parent
+lib_parent_dir = script_dir # If running from project root where dirtree.py and dirtree_lib/ are siblings
+lib_dir_as_subdir = script_dir / 'dirtree_lib' # If dirtree_lib is a subdirectory
 
-if lib_dir.exists() and lib_dir.is_dir():
-    if str(lib_dir) not in sys.path:
-        sys.path.insert(0, str(lib_dir.parent))  # Add the parent directory to sys.path
-else:
-    # Try for development setup - if we're running from the source directory
-    # where all modules are in the same directory as this script
-    if script_dir not in sys.path:
+# Scenario 1: dirtree.py is in project root, dirtree_lib is a subdir.
+# Add project_root to path so `from dirtree_lib import ...` works.
+if lib_dir_as_subdir.is_dir():
+    if str(script_dir) not in sys.path:
         sys.path.insert(0, str(script_dir))
+# Scenario 2: dirtree.py is inside dirtree_lib (e.g. during development/testing if run directly)
+# Add parent of dirtree_lib (project root) to path.
+elif script_dir.name == 'dirtree_lib' and script_dir.parent.is_dir():
+    project_root = script_dir.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+# Scenario 3: Potentially installed, rely on standard Python path.
 
 try:
-    # Try to import normally from package first
-    try:
-        from dirtree_lib import __version__, main
-    except ImportError:
-        # If that fails, try relative import for development version
-        from dirtree_cli import main, __version__
-        
-    # Show initialization message
-    print(f"IntuitiveDirTree v{__version__} - Starting up...")
-    
+    from dirtree_lib import __version__ # Get version from package
+    from dirtree_lib.dirtree_cli import main # Get main CLI function
 except ImportError as e:
-    print(f"Error: Could not import required modules.", file=sys.stderr)
+    print(f"Error: Could not import IntuitiveDirTree components.", file=sys.stderr)
     print(f"Details: {e}", file=sys.stderr)
-    print(f"Please ensure the package is correctly installed or the 'dirtree_lib' directory exists.", file=sys.stderr)
-    print(f"You may need to run: pip install -e .", file=sys.stderr)
+    print(f"Current sys.path: {sys.path}", file=sys.stderr)
+    print("Please ensure the package is correctly installed (e.g., 'pip install -e .') "
+          "or run from the project root directory.", file=sys.stderr)
     sys.exit(1)
 
 if __name__ == "__main__":
-    # Execute the main command-line interface logic
+    # print(f"IntuitiveDirTree v{__version__} - Initializing...") # Optional: moved to CLI main
     main()

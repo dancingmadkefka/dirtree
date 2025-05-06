@@ -16,14 +16,14 @@ from typing import List, Set, Counter as CounterType, Callable, Optional
 # Import Colors for potential warnings within the scanner itself
 try:
     from .dirtree_styling import Colors
-    from .dirtree_config import COMMON_EXCLUDES
+    from .dirtree_config import COMMON_DIR_EXCLUDES # Use specific smart dir excludes for scanning
 except ImportError:
-    try:
+    try: # For direct execution for testing scanner
         from dirtree_styling import Colors
-        from dirtree_config import COMMON_EXCLUDES
+        from dirtree_config import COMMON_DIR_EXCLUDES
     except ImportError:
-        class Colors: RESET = ""; YELLOW = "" # Dummy
-        COMMON_EXCLUDES = []
+        class Colors: RESET = ""; YELLOW = ""; CYAN = "" # Dummy
+        COMMON_DIR_EXCLUDES = []
 
 def scan_directory(
     root_dir: Path,
@@ -31,177 +31,134 @@ def scan_directory(
     max_items: int,
     show_hidden: bool,
     log_func: Callable, # Function for logging messages
-    initial_exclude_patterns: Optional[List[str]] = None # Patterns to exclude during the scan
+    # For scanning, we primarily care about not recursing into very large common junk folders.
+    # Other exclude patterns are less relevant for simple discovery.
+    initial_scan_recursion_excludes: Optional[List[str]] = None 
 ) -> CounterType[str]:
     """
-    Scans directory to find file extensions or directory names, respecting filters.
-    This scan is primarily for *discovery* to populate interactive selection lists.
-    It uses minimal filtering (currently only 'show_hidden') to find potential items.
-
-    Args:
-        root_dir: The directory to start scanning from.
-        scan_type: 'file' to scan for file extensions, 'dir' for directory names.
-        max_items: Maximum number of filesystem items to inspect.
-        show_hidden: Whether to include hidden items (starting with '.') in the scan.
-        log_func: A callable for logging messages (e.g., log_func(message, level)).
-        initial_exclude_patterns: Patterns to exclude during the scan (e.g., from smart exclude).
-
-    Returns:
-        A Counter object mapping found items (extensions or dir names) to their counts.
+    Scans directory to find file extensions or directory names for interactive selection lists.
+    Uses minimal filtering (show_hidden and recursion excludes) for broad discovery.
     """
     log_func(f"Starting {scan_type} scan in '{root_dir}' (max: {max_items}, hidden: {show_hidden})", "info")
     item_counter: CounterType[str] = Counter()
     scanned_count = 0
     scan_label = "file types" if scan_type == "file" else "directory names"
 
-    # --- Spinner setup ---
-    spinner = ["/", "-", "\\", "|"] if sys.stdout.isatty() else [""] # No spinner if not TTY
+    spinner_chars = ["/", "-", "\\", "|"] if sys.stdout.isatty() else [""]
     spinner_idx = 0
     term_width = shutil.get_terminal_size((80, 20)).columns
     last_status_len = 0
-    start_time = time.monotonic()
+    last_update_time = time.monotonic()
 
-    # --- Setup high-performance scan exclusions ---
-    # These directories are always excluded from *recursion*
-    # but will still be counted in the directory name scan
-    scan_exclude_dirs = {
+    # Performance exclude for scan recursion (these are not user patterns, but hardcoded for scan speed)
+    # We combine this with any passed `initial_scan_recursion_excludes` which might come from smart excludes.
+    hardcoded_scan_perf_excludes = {
         "node_modules", "__pycache__", ".git", ".venv", "venv", "env",
-        "build", "dist", ".cache", ".npm", ".next", "out"
+        "build", "dist", ".cache", ".npm", ".next", "out", "target", "obj",
+        # Add others if they are known to be huge and slow down scans
     }
+    final_recursion_excludes = hardcoded_scan_perf_excludes.copy()
+    if initial_scan_recursion_excludes:
+        final_recursion_excludes.update(initial_scan_recursion_excludes)
     
-    # Combine with any user-provided patterns
-    exclude_patterns = list(initial_exclude_patterns or [])
-    
-    log_func(f"Scanner using exclude patterns: {exclude_patterns}", "debug")
-    log_func(f"Scanner will not recurse into: {scan_exclude_dirs}", "debug")
+    log_func(f"Scanner will not recurse into (for perf): {final_recursion_excludes}", "debug")
 
-    # --- Scan Setup ---
-    dirs_to_scan: List[Path] = []
-    seen_dirs: Set[Path] = set()
+    dirs_to_scan_queue: List[Path] = []
+    seen_physical_dirs: Set[Path] = set() # To avoid symlink loops by resolved path
+
     try:
-        # Resolve root to handle symlinks properly in seen set and start scan
         resolved_root = root_dir.resolve()
-        seen_dirs.add(resolved_root)
-        dirs_to_scan.append(root_dir) # Start with the original path
+        seen_physical_dirs.add(resolved_root)
+        dirs_to_scan_queue.append(root_dir) # Start with original path
         log_func(f"Resolved root for scan: '{resolved_root}'", "debug")
-    except Exception as e:
-         # Non-fatal error, proceed with unresolved root but log it
-         print(f"\n{Colors.YELLOW}Warning: Could not resolve root dir '{root_dir}' for scan: {e}{Colors.RESET}")
-         log_func(f"Could not resolve root '{root_dir}' for scan: {e}", "warning")
-         seen_dirs.add(root_dir) # Add unresolved path to seen set
-         dirs_to_scan.append(root_dir)
+    except Exception as e_resolve_root:
+         print(f"\n{Colors.YELLOW}Warning: Could not resolve root dir '{root_dir}' for scan: {e_resolve_root}{Colors.RESET}")
+         log_func(f"Could not resolve root '{root_dir}' for scan: {e_resolve_root}", "warning")
+         # Add unresolved path to seen set to prevent trying to resolve it again if encountered
+         # This doesn't fully prevent loops if symlinks point back to unresolved paths, but helps.
+         try: seen_physical_dirs.add(root_dir.absolute()) 
+         except: pass # If absolute also fails
+         dirs_to_scan_queue.append(root_dir)
 
-    # --- BFS Directory Traversal ---
     try:
-        while dirs_to_scan and scanned_count < max_items:
-            current_dir = dirs_to_scan.pop(0) # BFS - pop from start
-            log_func(f"Scanning dir: '{current_dir}'", "debug")
+        while dirs_to_scan_queue and scanned_count < max_items:
+            current_dir_to_scan = dirs_to_scan_queue.pop(0) # BFS
+            log_func(f"Scanning dir: '{current_dir_to_scan}'", "debug")
 
-            # Update spinner less frequently for performance
-            if spinner and (scanned_count % 50 == 0 or scanned_count < 10 or time.monotonic() - start_time > 0.5):
-                elapsed = time.monotonic() - start_time
-                status = f"{spinner[spinner_idx % len(spinner)]} Scanned {scanned_count}/{max_items} items... Found {len(item_counter)} unique {scan_label} ({elapsed:.1f}s)"
-                # Pad with spaces to clear previous line remnants
+            current_time = time.monotonic()
+            if spinner_chars[0] and (scanned_count % 100 == 0 or scanned_count < 20 or (current_time - last_update_time) > 0.2):
+                elapsed = current_time - last_update_time # This is interval, not total
+                status = f"{spinner_chars[spinner_idx % len(spinner_chars)]} Scanned {scanned_count}/{max_items} items... Found {len(item_counter)} unique {scan_label} ({elapsed:.1f}s since last update)"
                 padded_status = status.ljust(last_status_len)
                 print(f"\r{padded_status}", end="", flush=True)
-                last_status_len = len(status) # Store current length
+                last_status_len = len(status)
                 spinner_idx += 1
-                start_time = time.monotonic() # Reset timer for next update interval
+                last_update_time = current_time
 
             try:
-                # Using scandir is generally faster than iterdir+stat
-                for entry in os.scandir(current_dir):
+                for entry in os.scandir(current_dir_to_scan):
                     if scanned_count >= max_items: break
+                    entry_path_obj = Path(entry.path)
 
-                    entry_path = Path(entry.path) # Create Path object once
-
-                    # --- FILTERING ---
-                    # Filter hidden files
-                    is_hidden = entry.name.startswith('.')
-                    if is_hidden and not show_hidden:
+                    is_hidden_entry = entry.name.startswith('.')
+                    if is_hidden_entry and not show_hidden:
                         log_func(f"Scan Filter: Skipping hidden '{entry.name}' during discovery", "debug")
-                        continue # Skip hidden if show_hidden is False
-                    
-                    # Apply explicit exclude patterns
-                    is_excluded = False
-                    for pattern in exclude_patterns:
-                        if fnmatch.fnmatch(entry.name, pattern):
-                            log_func(f"Scan Filter: Skipping '{entry.name}' matching exclude pattern '{pattern}'", "debug")
-                            is_excluded = True
-                            break
-                    if is_excluded:
                         continue
-                    # --- END FILTERING ---
+                    
+                    # Note: We do NOT apply complex exclude patterns during this discovery scan,
+                    # only the `final_recursion_excludes` for performance.
 
-                    # Increment only if passing minimal filters
-                    scanned_count += 1
+                    scanned_count += 1 # Count an item if it passes basic hidden check
 
                     try:
-                        # Use cached stat from scandir if possible
-                        # Follow symlinks for dirs to scan into them, but not for files/type checking
-                        is_dir = entry.is_dir() # Checks if it's a directory (or symlink to one)
-                        is_file = entry.is_file() # Checks if it's a file (or symlink to one)
-                    except OSError as stat_error:
-                         log_func(f"Scan: Could not stat '{entry.path}', skipping. Error: {stat_error}", "warning")
-                         continue # Skip items we can't stat
+                        is_dir_type = entry.is_dir() # Follows symlinks for type check by default
+                        is_file_type = entry.is_file()
+                    except OSError as e_stat:
+                         log_func(f"Scan: Could not stat '{entry.path}', skipping. Error: {e_stat}", "warning")
+                         continue
 
-                    # Process Files for Type Scan
-                    if scan_type == "file" and is_file:
-                        # Don't follow symlinks for file type check
-                        ext = entry_path.suffix.lower().lstrip(".") if entry_path.suffix else "(no ext)"
+                    if scan_type == "file" and is_file_type:
+                        ext = entry_path_obj.suffix.lower().lstrip(".") if entry_path_obj.suffix else "(no ext)"
                         item_counter[ext] += 1
                         log_func(f"Scan Found File: '{entry.name}' (ext: {ext})", "debug")
 
-                    # Process Directories for Name Scan and Queueing
-                    elif is_dir: # Intentionally includes symlinks to directories
-                        dir_name = entry.name # Get dir name once
-
-                        # If scanning for directory names, add its name to the counter
+                    elif is_dir_type:
+                        dir_name_str = entry.name
                         if scan_type == "dir":
-                            item_counter[dir_name] += 1
-                            log_func(f"Scan Found Dir Name: '{dir_name}'", "debug")
-                            
-                        # Check if we should recurse into this directory during scanning
-                        should_recurse = True
+                            item_counter[dir_name_str] += 1
+                            log_func(f"Scan Found Dir Name: '{dir_name_str}'", "debug")
                         
-                        # Don't recurse into directories in the high-performance exclude list
-                        if dir_name in scan_exclude_dirs:
-                            should_recurse = False
-                            log_func(f"Scan Skip Recurse: '{dir_name}' is in performance exclude list", "debug")
-                        
-                        # Only add directory to scan queue if we should recurse
-                        if should_recurse:
+                        # Recursion decision for scan performance
+                        if dir_name_str not in final_recursion_excludes:
                             try:
-                                # Resolve directory to avoid cycles
-                                real_path = entry_path.resolve()
-                                if real_path not in seen_dirs:
-                                    seen_dirs.add(real_path)
-                                    dirs_to_scan.append(entry_path) # Add original path to scan queue
-                                    log_func(f"Scan Queue Add: '{entry_path}' (resolves to '{real_path}')", "debug")
+                                resolved_entry_path = entry_path_obj.resolve()
+                                if resolved_entry_path not in seen_physical_dirs:
+                                    seen_physical_dirs.add(resolved_entry_path)
+                                    dirs_to_scan_queue.append(entry_path_obj) # Add original path
+                                    log_func(f"Scan Queue Add: '{entry_path_obj}' (resolves to '{resolved_entry_path}')", "debug")
                                 else:
-                                    log_func(f"Scan Dir Seen: '{entry_path}' resolves to '{real_path}'", "debug")
-                            except Exception as e_resolve:
-                                # Non-fatal, just don't scan into it
-                                log_func(f"Scan: Could not resolve dir '{entry_path}', not adding to queue: {e_resolve}", "warning")
-
+                                    log_func(f"Scan Dir Already Seen (resolved): '{entry_path_obj}' -> '{resolved_entry_path}'", "debug")
+                            except Exception as e_resolve_entry:
+                                log_func(f"Scan: Could not resolve dir '{entry_path_obj}', not queueing: {e_resolve_entry}", "warning")
+                        else:
+                             log_func(f"Scan Skip Recurse (perf): '{dir_name_str}' is in perf exclude list", "debug")
+                
                 if scanned_count >= max_items:
                     log_func(f"Scan reached max items ({max_items}).", "info")
                     break
-
             except PermissionError:
-                log_func(f"Scan: Permission denied for '{current_dir}', skipping.", "warning")
-            except FileNotFoundError:
-                log_func(f"Scan: Directory '{current_dir}' not found (possibly removed during scan?), skipping.", "warning")
-            except Exception as e_scan:
-                log_func(f"Scan: Unexpected error scanning '{current_dir}': {e_scan}", "error")
+                log_func(f"Scan: Permission denied for '{current_dir_to_scan}', skipping.", "warning")
+            except FileNotFoundError: # Can happen if dir is deleted during scan
+                log_func(f"Scan: Directory '{current_dir_to_scan}' not found, skipping.", "warning")
+            except Exception as e_inner_scan:
+                log_func(f"Scan: Unexpected error scanning '{current_dir_to_scan}': {e_inner_scan}", "error")
 
     except KeyboardInterrupt:
         print("\nScan interrupted by user.")
         log_func("Scan interrupted by user.", "warning")
-        # Allow partial results to be returned
     finally:
-        if spinner: # Clear spinner line
-            print("\r" + " " * last_status_len + "\r", end="", flush=True)
+        if spinner_chars[0]: # Clear spinner line
+            print("\r" + " " * (last_status_len + 5) + "\r", end="", flush=True)
 
-    log_func(f"Scan finished. Found {len(item_counter)} unique {scan_label} from {scanned_count} items scanned.", "info")
+    log_func(f"Scan finished. Found {len(item_counter)} unique {scan_label} from {scanned_count} items processed.", "info")
     return item_counter

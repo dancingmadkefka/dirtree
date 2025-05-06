@@ -14,7 +14,7 @@ sys.path.insert(0, str(package_root / 'dirtree_lib'))
 # Now attempt the imports
 try:
     from dirtree_lib.dirtree_core import IntuitiveDirTree
-    from dirtree_lib.dirtree_config import COMMON_EXCLUDES
+    from dirtree_lib.dirtree_config import COMMON_DIR_EXCLUDES, COMMON_FILE_EXCLUDES # Updated
     from dirtree_lib.dirtree_cli import parse_args
 except ImportError as e:
     pytest.fail(f"Failed to import dirtree_lib components: {e}\n"
@@ -25,20 +25,20 @@ except ImportError as e:
 
 def create_test_structure(base_path: Path, structure: Dict[str, Any]):
     """Recursively creates a directory structure from a dictionary."""
-    # Ensure the base path exists
     base_path.mkdir(parents=True, exist_ok=True)
 
     for name, content in structure.items():
         path = base_path / name
-        if isinstance(content, dict):
+        if isinstance(content, dict): # Directory
             path.mkdir(parents=True, exist_ok=True)
             create_test_structure(path, content)
-        elif isinstance(content, str): # File content
-            # Ensure parent directory exists
+        elif isinstance(content, str): # File with text content
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding='utf-8')
+        elif isinstance(content, bytes): # File with binary content
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
         elif content is None: # Empty file
-            # Ensure parent directory exists
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
         else:
@@ -50,55 +50,54 @@ def base_test_structure(tmp_path):
     structure = {
         "project_root": {
             "src": {
-                "main.py": "print('hello')",
+                "main.py": "print('hello from main.py')",
                 "utils": {
-                    "helpers.py": "# Utility functions",
-                    "data.json": '{"key": "value"}',
+                    "helpers.py": "# Utility functions from helpers.py",
+                    "data.json": '{"key": "value from data.json"}',
                 },
                 "feature": {
-                    "component.js": "// JS Component",
-                    "style.css": "body { color: blue; }",
+                    "component.js": "// JS Component from component.js",
+                    "style.css": "/* CSS from style.css */",
                 }
             },
-            "tests": {
-                "test_main.py": "import pytest",
-                "test_helpers.py": "import pytest",
+            "tests": { # Often excluded for LLM content by user
+                "test_main.py": "import pytest # from test_main.py",
+                "test_helpers.py": "import pytest # from test_helpers.py",
+                "__pycache__": { # Smart excluded dir
+                    "test_cache.pyc": b"test pyc content"
+                }
             },
-            "node_modules": { # Common exclude target
+            "node_modules": { # Smart excluded dir
                 "package_a": {
-                    "index.js": "// Package A",
-                    "readme.md": "Package A Readme"
-                },
-                "package_b": {
-                    "main.js": "// Package B",
+                    "index.js": "// Package A from index.js",
+                    "readme.md": "Package A Readme from readme.md"
                 }
             },
-            ".git": { # Common exclude target
+            ".git": { # Smart excluded dir
                 "config": "[core]\nrepositoryformatversion = 0",
-                "HEAD": "ref: refs/heads/main",
             },
-            ".env": "SECRET_KEY=12345", # Hidden file
+            ".env": "SECRET_KEY=12345 # from .env", # Hidden file
             "docs": {
-                "index.md": "# Documentation",
-                "api.md": "## API Reference",
+                "index.md": "# Documentation from index.md",
+                "api.md": "## API Reference from api.md",
             },
-            "data": { # Sometimes excluded
-                "input.csv": "col1,col2\n1,2",
-                "temp_output.log": "Log line 1", # Excludable by pattern
+            "coverage": { # Often excluded for LLM content by user
+                "report.html": "<html>Coverage Report</html>",
+                "clover.xml": "<xml>Clover</xml>"
             },
-            "build": { # Common exclude target
-                "output.bin": b"binarydata".decode('latin-1'), # Use compatible string for write_text
-                "report.txt": "Build report"
+            "build": { # Smart excluded dir
+                "output.bin": b"binarydata from output.bin",
+                "report.txt": "Build report from report.txt"
             },
-            "__pycache__": { # Common exclude target
-                "helpers.cpython-39.pyc": "# pyc content"
+            "__pycache__": { # Smart excluded dir (top level)
+                "main.cpython-39.pyc": b"main pyc content"
             },
-            "README.md": "# My Project",
-            "requirements.txt": "pytest\npick",
-            "temp_file.tmp": "Temporary data" # Excludable by pattern
+            "README.md": "# My Project from README.md",
+            "package-lock.json": "{ \"name\": \"project\" }", # Smart file exclude for LLM
+            "requirements.txt": "pytest\npick # from requirements.txt",
         }
     }
-    root = tmp_path / "test_proj"
+    root = tmp_path / "test_proj" # This is the actual root passed to dirtree
     create_test_structure(root, structure["project_root"])
     return root
 
@@ -106,64 +105,65 @@ def base_test_structure(tmp_path):
 def run_dirtree_and_capture(capsys):
     """Fixture to run IntuitiveDirTree and capture output."""
     def _run(config_overrides: Dict[str, Any]):
-        # Ensure root_dir exists and is valid
         if 'root_dir' not in config_overrides:
-            raise ValueError("run_dirtree_and_capture requires 'root_dir' in config_overrides")
-        root_dir = Path(config_overrides['root_dir'])
-        if not root_dir.is_dir():
-             raise FileNotFoundError(f"Test setup error: root_dir '{root_dir}' does not exist or is not a directory.")
+            raise ValueError("run_dirtree_and_capture requires 'root_dir'")
+        root_dir_path = Path(config_overrides['root_dir'])
+        if not root_dir_path.is_dir():
+             raise FileNotFoundError(f"Test root_dir '{root_dir_path}' not found.")
 
-        # Default config values that can be overridden
         config = {
-            'style': 'ascii', # Use predictable ASCII for tests
-            'max_depth': None,
-            'show_hidden': False,
-            'colorize': False, # Disable color for easier assertion
-            'show_size': False,
-            'include_patterns': None,
-            'exclude_patterns': None,
+            'style': 'ascii', 'max_depth': None, 'show_hidden': False,
+            'colorize': False, 'show_size': False,
+            'cli_include_patterns': None, 'cli_exclude_patterns': None,
             'use_smart_exclude': True,
-            'export_for_llm': False,
-            'max_llm_file_size': 100 * 1024,
-            'llm_content_extensions': None,
-            'llm_indicators': 'included',
-            'verbose': False,
-            'interactive_prompts': False, # Non-interactive for tests
-            'skip_errors': True, # Skip errors during tests
-            'output_dir': None
+            'interactive_file_type_includes_for_llm': None,
+            'interactive_dir_excludes_for_llm': None,
+            'export_for_llm': False, 'max_llm_file_size': 100 * 1024,
+            'llm_content_extensions': None, 'llm_indicators': 'included',
+            'verbose': False, 'interactive_prompts': False, 'skip_errors': True,
+            'output_dir': None, 'add_file_marker': False,
+            **config_overrides # Apply overrides
         }
-        config.update(config_overrides)
+        
+        # Ensure output_dir is a Path if specified, for consistency
+        if config['output_dir'] and isinstance(config['output_dir'], str):
+            config['output_dir'] = Path(config['output_dir'])
 
-        # Filter config to only include valid arguments for IntuitiveDirTree constructor
-        valid_args = {
-            k: v for k, v in config.items()
-            if k in IntuitiveDirTree.__init__.__code__.co_varnames
-        }
 
+        valid_args = { k: v for k, v in config.items() if k in IntuitiveDirTree.__init__.__code__.co_varnames }
+        
         try:
-            # Clear cache before run if needed (optional, usually instance is new)
-            # IntuitiveDirTree._cached_tree_lines = None
-            # IntuitiveDirTree._cached_listed_paths = None
-
             tree_generator = IntuitiveDirTree(**valid_args)
-            tree_generator.run() # This includes generate_tree and print_results
+            tree_generator.run()
             captured = capsys.readouterr()
 
-            # Also return the generated tree lines and paths for finer checks
             tree_lines = tree_generator._cached_tree_lines or []
-            listed_paths = tree_generator._cached_listed_paths or []
-            llm_export_file = None
-            if config.get('export_for_llm'):
-                 # Construct potential filename (might need refinement based on actual naming)
-                 export_filename_pattern = f"dirtree_export_{root_dir.name}_*.md"
-                 save_dir = Path(config.get('output_dir') or Path.cwd())
-                 found_exports = list(save_dir.glob(export_filename_pattern))
-                 if found_exports:
-                     llm_export_file = found_exports[0] # Assume newest if multiple match
+            listed_paths = tree_generator._cached_listed_paths_in_tree or []
+            
+            llm_export_file_path = None
+            if config.get('export_for_llm') and tree_generator.llm_files_included_content > 0:
+                 # Attempt to find the export file based on naming convention
+                 save_dir = config.get('output_dir') or Path.cwd()
+                 # Glob for files matching the export pattern, sort by creation time, take newest
+                 # This is a bit fragile if multiple tests run very close together.
+                 # A more robust way would be if tree_generator returned the path.
+                 # For now, this is a common approach.
+                 export_pattern = f"dirtree_export_{root_dir_path.name.replace(' ', '_')}_*.md"
+                 
+                 # Ensure save_dir is a Path object
+                 if isinstance(save_dir, str): save_dir = Path(save_dir)
 
-            return captured.out, captured.err, tree_lines, listed_paths, llm_export_file
+                 found_exports = sorted(
+                     save_dir.glob(export_pattern), 
+                     key=os.path.getmtime, 
+                     reverse=True
+                 )
+                 if found_exports:
+                     llm_export_file_path = found_exports[0]
+
+            return captured.out, captured.err, tree_lines, listed_paths, llm_export_file_path
 
         except Exception as e:
-            pytest.fail(f"IntuitiveDirTree failed to run with config {valid_args}: {e}")
+            pytest.fail(f"IntuitiveDirTree failed with config {valid_args}: {e}\n{traceback.format_exc()}")
 
     return _run
