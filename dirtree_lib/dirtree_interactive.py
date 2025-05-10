@@ -8,10 +8,9 @@ setup workflow.
 import sys
 import os
 import fnmatch
-import traceback
 from pathlib import Path
 from collections import Counter
-from typing import Optional, List, Tuple, Dict, Any, Set, Counter as CounterType, Callable
+from typing import Optional, List, Tuple, Dict, Any, Set, Counter as CounterType
 
 # --- Optional Dependency: pick ---
 pick_module: Optional[Any] = None # Renamed to avoid conflict with function name
@@ -41,7 +40,14 @@ try:
     from . import __version__
 except ImportError:
     print("Warning: Running interactive module potentially outside of package context.", file=sys.stderr)
-    class Colors: RESET = ""; YELLOW = ""; GREEN = ""; CYAN = ""; BOLD = ""; RED = ""; MAGENTA = ""
+    class Colors:
+        RESET = ""
+        YELLOW = ""
+        GREEN = ""
+        CYAN = ""
+        BOLD = ""
+        RED = ""
+        MAGENTA = ""
     class TreeStyle:
         AVAILABLE = {"ascii": {}, "unicode": {}, "bold": {}, "rounded": {}, "emoji": {}, "minimal": {}}
     DEFAULT_LLM_INCLUDE_EXTENSIONS = set()
@@ -109,8 +115,10 @@ def select_directory_interactive(start_dir: Optional[str] = None) -> Optional[st
 
             selected_text, selected_value = selected_option_tuple
 
-            if selected_value == "__CANCEL__": return None
-            if selected_value == str(current_path): return str(current_path) # ✅ Select Current
+            if selected_value == "__CANCEL__":
+                return None
+            if selected_value == str(current_path):
+                return str(current_path) # ✅ Select Current
 
             new_path_candidate = Path(selected_value)
             if selected_value == "__BACK__":
@@ -125,7 +133,8 @@ def select_directory_interactive(start_dir: Optional[str] = None) -> Optional[st
 
     except (KeyboardInterrupt, Exception) as e:
         print("\nDirectory selection cancelled or failed.")
-        if not isinstance(e, KeyboardInterrupt): print(f"Error: {e}")
+        if not isinstance(e, KeyboardInterrupt):
+            print(f"Error: {e}")
         return None
 
 
@@ -151,10 +160,9 @@ def general_interactive_selection(
 
     options = []
     for name, count in sorted_items:
-        # Don't show pre-selection ticks as they're confusing
-        # Instead, mark smart-excluded directories with a special indicator
-        if name in COMMON_DIR_EXCLUDES or name.startswith("__"):
-            prefix = "🔒 "  # Lock symbol to indicate these are always excluded
+        # Use checkmark for preselected items to make selection state clearer
+        if name in actual_preselected:
+            prefix = "✓ "
         else:
             prefix = "  "
         options.append((f"{prefix}{name} ({count} occurrences)", name))
@@ -167,7 +175,7 @@ def general_interactive_selection(
         if found_common:
             options.insert(2, (f"🔍 Select {common_suggestion_label}", "__COMMON__"))
 
-    full_title = f"{prompt_title}\nControls: ↑/↓ Navigate | Space Toggle | Enter Confirm\nTip: 'ALL'/'NONE'/'COMMON' can save time.\nNote: 🔒 items are always excluded regardless of selection."
+    full_title = f"{prompt_title}\nControls: ↑/↓ Navigate | Space Toggle | Enter Confirm\nTip: 'ALL'/'NONE'/'COMMON' can save time."
 
     try:
         # Pre-select items by marking them in the options list for display
@@ -181,7 +189,8 @@ def general_interactive_selection(
         selected_options_tuples = picker.start() # List of (option_data, index)
     except (KeyboardInterrupt, Exception) as e:
         print(f"\n{item_type_label.capitalize()} selection cancelled or failed.")
-        if not isinstance(e, KeyboardInterrupt): print(f"Error: {e}")
+        if not isinstance(e, KeyboardInterrupt):
+            print(f"Error: {e}")
         return list(actual_preselected) # Return original preselection on error
 
     selected_names = []
@@ -234,25 +243,30 @@ def run_interactive_setup() -> Dict[str, Any]:
         picker = pick_module.Picker([opt[0] for opt in dir_options], "Choose directory source:", indicator="=>")
         _, dir_choice_idx = picker.start()
     else: # Fallback to text input
-        for opt_text, _ in dir_options: print(opt_text)
+        for opt_text, _ in dir_options:
+            print(opt_text)
         choice_num_str = input(f"Choose option [1-{len(dir_options)}]: ").strip()
         dir_choice_idx = int(choice_num_str) -1 if choice_num_str.isdigit() and 0 < int(choice_num_str) <= len(dir_options) else 0
 
     chosen_dir_action = dir_options[dir_choice_idx][1]
 
-    if chosen_dir_action == "__CANCEL__": return {}
+    if chosen_dir_action == "__CANCEL__":
+        return {}
     elif chosen_dir_action == "__SELECT__":
         selected_dir_str = select_directory_interactive(start_dir=str(default_dir_path_str or current_dir_path))
-        if selected_dir_str is None: return {}
+        if selected_dir_str is None:
+            return {}
         config['root_dir'] = selected_dir_str
     elif chosen_dir_action == "__MANUAL__":
         manual_path_str = input("Enter directory path: ").strip()
         try:
             p = Path(manual_path_str).resolve(strict=True)
-            if not p.is_dir(): raise NotADirectoryError
+            if not p.is_dir():
+                raise NotADirectoryError
             config['root_dir'] = str(p)
         except (FileNotFoundError, NotADirectoryError):
-            print(f"{Colors.RED}Error: Invalid path or not a directory. Aborting.{Colors.RESET}"); return {}
+            print(f"{Colors.RED}Error: Invalid path or not a directory. Aborting.{Colors.RESET}")
+            return {}
     else: # Direct path choice (current or default)
         config['root_dir'] = chosen_dir_action
 
@@ -284,10 +298,12 @@ def run_interactive_setup() -> Dict[str, Any]:
     print(f"\n{Colors.BOLD}Interactive Filtering for LLM Content:{Colors.RESET}")
     if input(f"Scan directory to select file types/directories for LLM export? [y/{Colors.GREEN}N{Colors.RESET}]: ").lower() == 'y':
         scan_max = 20000
-        verbose_log_scan = lambda msg, lvl="debug": log_message(msg, level=lvl, verbose=True, colorize=True)
+
+        def verbose_log_scan(msg, lvl="debug"):
+            log_message(msg, level=lvl, verbose=True, colorize=True)
 
         # Scan for file types (for LLM content inclusion)
-        print(f"\n--- Scanning for File Types (for LLM Content Inclusion) ---")
+        print("\n--- Scanning for File Types (for LLM Content Inclusion) ---")
         input("Press Enter to start scan...")
         file_types_counts = scan_directory(Path(config['root_dir']), "file", scan_max, config['show_hidden'], verbose_log_scan, initial_scan_excludes)
         if file_types_counts:
@@ -299,7 +315,7 @@ def run_interactive_setup() -> Dict[str, Any]:
             config['interactive_file_type_includes_for_llm'] = []
 
         # Scan for directory names (for LLM content exclusion)
-        print(f"\n--- Scanning for Directory Names (for LLM Content Exclusion) ---")
+        print("\n--- Scanning for Directory Names (for LLM Content Exclusion) ---")
         input("Press Enter to start scan...")
         dir_names_counts = scan_directory(Path(config['root_dir']), "dir", scan_max, config['show_hidden'], verbose_log_scan, initial_scan_excludes)
         if dir_names_counts:
@@ -344,7 +360,66 @@ def run_interactive_setup() -> Dict[str, Any]:
     print(f"\n{Colors.BOLD}Step 4: LLM Export Configuration{Colors.RESET}")
     config['export_for_llm'] = input(f"Generate LLM export file? [y/{Colors.GREEN}N{Colors.RESET}]: ").lower() == 'y'
     if config['export_for_llm']:
-        max_size_str = input(f"Max content size per file for LLM export (e.g., 50k, 1m) [{Colors.GREEN}100k{Colors.RESET}]: ").strip().lower()
+        print(f"\n{Colors.MAGENTA}---Content Size Limit for LLM Export---{Colors.RESET}")
+        print("Maximum size per file for LLM content (files larger will be truncated or excluded).")
+
+        # --- Display largest potentially includable files ---
+        # This scan respects smart excludes and interactive LLM dir excludes to give relevant file sizes.
+        # It aims to show text-like files.
+        print(f"Scanning for largest potentially includable text files in '{Colors.CYAN}{config['root_dir']}{Colors.RESET}'...")
+        candidate_files_for_size_check = []
+
+        # Determine LLM exclusion patterns active at this point
+        current_smart_dir_excludes = COMMON_DIR_EXCLUDES if config['use_smart_exclude'] else []
+        current_smart_file_excludes_llm = COMMON_FILE_EXCLUDES if config['use_smart_exclude'] else []
+        current_interactive_dir_excludes_llm = set(config.get('interactive_dir_excludes_for_llm', []))
+
+        try:
+            for item_root, dirs, files in os.walk(Path(config['root_dir']), topdown=True):
+                item_root_path = Path(item_root)
+                # Filter dirs for os.walk to not descend into smart excluded or interactively LLM excluded dirs
+                dirs[:] = [d_name for d_name in dirs
+                           if not any(fnmatch.fnmatch(d_name, pat) for pat in current_smart_dir_excludes) and \
+                              d_name not in current_interactive_dir_excludes_llm and \
+                              (config['show_hidden'] or not d_name.startswith('.'))]
+
+                for f_name in files:
+                    if config['show_hidden'] or not f_name.startswith('.'):
+                        file_path = item_root_path / f_name
+                        file_ext = file_path.suffix.lower().lstrip(".")
+
+                        # Check against smart file excludes for LLM
+                        if any(fnmatch.fnmatch(f_name, pat) for pat in current_smart_file_excludes_llm):
+                            continue
+
+                        # Consider if it's a text-like file
+                        if file_ext not in DEFAULT_LLM_EXCLUDED_EXTENSIONS or file_ext in DEFAULT_LLM_INCLUDE_EXTENSIONS:
+                            try:
+                                candidate_files_for_size_check.append((file_path, file_path.stat().st_size))
+                            except OSError:
+                                pass # Skip files we can't stat
+
+            candidate_files_for_size_check.sort(key=lambda x: x[1], reverse=True)
+            if candidate_files_for_size_check:
+                print("Largest potentially includable files (for LLM context):")
+                max_to_show = 5
+                for i, (f_path, f_size) in enumerate(candidate_files_for_size_check[:max_to_show]):
+                    rel_path_str = str(f_path.relative_to(config['root_dir']))
+                    print(f"  {i+1}) {Colors.YELLOW}{rel_path_str}{Colors.RESET}: {format_bytes(f_size)}")
+                if len(candidate_files_for_size_check) > max_to_show:
+                    print(f"  ... and {len(candidate_files_for_size_check) - max_to_show} more.")
+
+                # Recommend a limit based on the largest few files
+                if candidate_files_for_size_check[0][1] > 50 * 1024: # If largest is > 50KB
+                    rec_limit = min(candidate_files_for_size_check[0][1] + (10*1024), 500 * 1024) # Add buffer, max 500KB
+                    print(f"Recommended LLM file size limit based on these: {Colors.CYAN}{format_bytes(rec_limit)}{Colors.RESET}")
+            else:
+                print("No text-like files found or accessible for size analysis.")
+        except Exception as e_scan_size:
+            print(f"{Colors.RED}Could not complete scan for largest files: {e_scan_size}{Colors.RESET}")
+        # --- End display largest files ---
+
+        max_size_str = input(f"Max content size per file for LLM (e.g., 50k, 1m) [{Colors.GREEN}100k{Colors.RESET}]: ").strip().lower()
         config['max_llm_file_size'] = parse_size_string(max_size_str, default=100 * 1024) if max_size_str else 100 * 1024
         print(f"  LLM Max File Size: {format_bytes(config['max_llm_file_size'])}")
 
@@ -354,7 +429,7 @@ def run_interactive_setup() -> Dict[str, Any]:
         # For interactive setup, we rely on interactive_file_type_includes_for_llm.
         config['llm_content_extensions'] = None # CLI arg, not set here
 
-        config['output_dir'] = input(f"Directory to save LLM export (empty for current dir): ").strip() or None
+        config['output_dir'] = input("Directory to save LLM export (empty for current dir): ").strip() or None
         config['add_file_marker'] = input(f"Add exclusion marker to LLM export file? [{Colors.GREEN}Y{Colors.RESET}/n]: ").lower() not in ['n', 'no']
 
         print("LLM inclusion indicators in tree:")
