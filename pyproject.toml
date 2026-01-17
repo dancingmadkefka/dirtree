@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dirtree"
+dynamic = ["version"]
+description = "A user-friendly directory tree generator with advanced filtering and LLM export"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [
+    {name = "dancingmadkefka", email = "dancingmadkefka@users.noreply.github.com"},
+]
+keywords = ["directory", "tree", "llm", "cli", "filesystem"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: System :: Filesystems",
+    "Topic :: Text Processing",
+    "Topic :: Utilities",
+]
+
+dependencies = [
+    "pick>=1.0.0",
+]
+
+[project.optional-dependencies]
+windows = ["windows-curses>=2.2.0"]
+
+[project.scripts]
+dirtree = "dirtree.dirtree_cli:main"
+
+[project.urls]
+Homepage = "https://github.com/dancingmadkefka/dirtree"
+Documentation = "https://github.com/dancingmadkefka/dirtree/blob/main/README.md"
+Repository = "https://github.com/dancingmadkefka/dirtree"
+"Bug Tracker" = "https://github.com/dancingmadkefka/dirtree/issues"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+include = ["dirtree*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "dirtree.__version__"}

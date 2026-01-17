@@ -331,5 +331,4 @@ def main():
         sys.exit(130)  # Standard exit code for SIGINT
 
 if __name__ == '__main__':
-    print("Running dirtree_cli directly...")
     main()

@@ -21,16 +21,6 @@ def _compile_pattern(pattern: str) -> Pattern[str]:
         regex_pattern = fnmatch.translate(pattern).replace(re.escape(Path('**').as_posix()), '.*') # More robust **
     else:
         regex_pattern = fnmatch.translate(pattern)
-    
-    # Ensure regex matches whole path segments for directory names unless wildcarded
-    if not any(c in pattern for c in ['*', '?', '[']):
-        # For plain names, ensure it matches a full segment or end of path
-        # e.g., 'node_modules' should match 'node_modules' or 'path/node_modules'
-        # not 'my_node_modules_project'
-        # This is complex to do perfectly with fnmatch.translate alone.
-        # The current logic of checking name and relative_path separately handles this.
-        pass
-
 
     compiled = re.compile(regex_pattern)
     _COMPILED_REGEX_CACHE[pattern] = compiled

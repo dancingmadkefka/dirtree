@@ -150,7 +150,7 @@ class IntuitiveDirTree:
             self._log(f"    Smart File Excludes (LLM): {self.smart_file_excludes_for_llm}", "debug")
 
         self._log(f"  Interactive Dir Excludes (LLM): {self.interactive_dir_excludes_llm}", "debug")
-        self. _log(f"  LLM Content Extensions (final): {self.llm_content_extensions_set or 'Default (non-binary)'}", "debug")
+        self._log(f"  LLM Content Extensions (final): {self.llm_content_extensions_set or 'Default (non-binary)'}", "debug")
 
         self._log(f"  Export LLM: {self.export_for_llm}", "debug")
         if self.export_for_llm:
@@ -183,6 +183,7 @@ class IntuitiveDirTree:
             self._log(f"Max depth {self.max_depth} reached at '{current_path}', stopping tree recursion.", "debug")
             return tree_lines, listed_paths_in_tree
 
+        real_path = None  # Initialize to track for cleanup
         try:
             real_path = current_path.resolve()
             if real_path in self._seen_paths_build:
@@ -274,9 +275,15 @@ class IntuitiveDirTree:
                         self.llm_files_included_content += 1
                         # Size accumulation will happen in generate_llm_export after reading
                         if self.llm_indicators != "none":
-                            llm_indicator_str = f" {Colors.GREEN}[LLM✓]{Colors.RESET}"
+                            if self.colorize:
+                                llm_indicator_str = f" {Colors.GREEN}[LLM✓]{Colors.RESET}"
+                            else:
+                                llm_indicator_str = " [LLM✓]"
                     elif self.llm_indicators == "all":
-                        llm_indicator_str = f" {Colors.GRAY}[LLM✗]{Colors.RESET}"
+                        if self.colorize:
+                            llm_indicator_str = f" {Colors.GRAY}[LLM✗]{Colors.RESET}"
+                        else:
+                            llm_indicator_str = " [LLM✗]"
 
                 except Exception as e_llm_check:
                     self._log(f"Could not check LLM inclusion for '{entry_path}': {e_llm_check}", "warning")
@@ -298,16 +305,25 @@ class IntuitiveDirTree:
             if self.show_size and not is_entry_dir:
                 try:
                     size_bytes = entry.stat(follow_symlinks=False).st_size
-                    size_info_str = f" ({Colors.GRAY}{format_bytes(size_bytes)}{reset})"
+                    if self.colorize:
+                        size_info_str = f" ({Colors.GRAY}{format_bytes(size_bytes)}{reset})"
+                    else:
+                        size_info_str = f" ({format_bytes(size_bytes)})"
                 except Exception as e_size:
                     self._log(f"Could not get size for '{entry_path}': {e_size}", "warning")
-                    size_info_str = f" ({Colors.RED}Size N/A{reset})"
+                    if self.colorize:
+                        size_info_str = f" ({Colors.RED}Size N/A{reset})"
+                    else:
+                        size_info_str = f" (Size N/A)"
 
             # Smart excluded dirs get a special marker in the tree
             # This is different from manually excluded for LLM dirs, which show full structure.
             smart_exclude_indicator = ""
             if is_entry_dir and is_smart_excluded_dir_type and not should_recurse_for_tree_display:
-                 smart_exclude_indicator = f" {Colors.YELLOW}[excluded]{reset}"
+                if self.colorize:
+                    smart_exclude_indicator = f" {Colors.YELLOW}[excluded]{reset}"
+                else:
+                    smart_exclude_indicator = " [excluded]"
 
 
             line = f"{prefix}{pointer}{emoji}{color}{display_name}{reset}{size_info_str}{llm_indicator_str}{smart_exclude_indicator}"
@@ -332,8 +348,8 @@ class IntuitiveDirTree:
                     else:
                         raise SystemExit(f"Aborted by user due to error recursing into {entry_path}.") from e_recurse
 
-        if 'real_path' in locals() and real_path in self._seen_paths_build:
-             self._seen_paths_build.remove(real_path)
+        if real_path is not None and real_path in self._seen_paths_build:
+            self._seen_paths_build.remove(real_path)
         return tree_lines, listed_paths_in_tree
 
     def generate_tree(self) -> None:
@@ -362,12 +378,19 @@ class IntuitiveDirTree:
             self._cached_listed_paths_in_tree = [self.root_dir] + sub_paths
             self._log(f"Tree generation complete. Scanned: {self.total_items_scanned}, Listed in tree: {self.items_listed_in_tree}, Skipped: {len(self.skipped_items)}", "info")
         except SystemExit:
-             print(f"\n{Colors.RED}Tree generation aborted.{Colors.RESET}")
+             if self.colorize:
+                 print(f"\n{Colors.RED}Tree generation aborted.{Colors.RESET}")
+             else:
+                 print("\nTree generation aborted.")
              self._cached_tree_lines = []
              self._cached_listed_paths_in_tree = []
         except Exception:
-             print(f"\n{Colors.RED}An unexpected error occurred during tree generation:{Colors.RESET}")
-             print(f"{Colors.RED}{traceback.format_exc()}{Colors.RESET}")
+             if self.colorize:
+                 print(f"\n{Colors.RED}An unexpected error occurred during tree generation:{Colors.RESET}")
+                 print(f"{Colors.RED}{traceback.format_exc()}{Colors.RESET}")
+             else:
+                 print("\nAn unexpected error occurred during tree generation:")
+                 print(traceback.format_exc())
              self._log(f"Unexpected error during generate_tree: {traceback.format_exc()}", "error")
              self._cached_tree_lines = []
              self._cached_listed_paths_in_tree = []
@@ -390,7 +413,10 @@ class IntuitiveDirTree:
         if self.total_items_scanned > 0:
              summary += f" (Total items scanned: {self.total_items_scanned})"
         if self.skipped_items:
-            summary += f", {Colors.YELLOW}{len(self.skipped_items)} skipped due to errors{Colors.RESET}"
+            if self.colorize:
+                summary += f", {Colors.YELLOW}{len(self.skipped_items)} skipped due to errors{Colors.RESET}"
+            else:
+                summary += f", {len(self.skipped_items)} skipped due to errors"
         print(summary + ".")
 
         if self.export_for_llm:
@@ -408,10 +434,16 @@ class IntuitiveDirTree:
                 print(f"  - {path}: {reason}")
 
         if llm_export_path:
-            print(f"\n{Colors.GREEN}✅ LLM export created: {llm_export_path}{Colors.RESET}")
+            if self.colorize:
+                print(f"\n{Colors.GREEN}✅ LLM export created: {llm_export_path}{Colors.RESET}")
+            else:
+                print(f"\n✅ LLM export created: {llm_export_path}")
             print(f"   To use this export with an LLM, upload the file or copy its contents.")
         elif self.export_for_llm: # If export was true but path is None
-            print(f"\n{Colors.YELLOW}⚠️ LLM export was enabled, but no content was included or an error occurred.{Colors.RESET}")
+            if self.colorize:
+                print(f"\n{Colors.YELLOW}⚠️ LLM export was enabled, but no content was included or an error occurred.{Colors.RESET}")
+            else:
+                print(f"\n⚠️ LLM export was enabled, but no content was included or an error occurred.")
 
     def run(self) -> None:
         self.generate_tree()

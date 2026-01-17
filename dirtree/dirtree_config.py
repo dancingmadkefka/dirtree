@@ -5,8 +5,11 @@ Configuration settings, constants, and default directory handling for IntuitiveD
 
 import os
 import json
+import logging
 from pathlib import Path
 from typing import Optional, List, Set, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 # --- Default Directory Functions ---
 def get_default_dir() -> Optional[str]:
@@ -16,8 +19,8 @@ def get_default_dir() -> Optional[str]:
         if config_file.exists():
             config = json.loads(config_file.read_text(encoding='utf-8'))
             return config.get('default_dir')
-    except Exception:
-        pass # Ignore errors reading config
+    except Exception as e:
+        logger.debug(f"Error reading default directory from config: {e}")
     return None
 
 def get_saved_config() -> Dict[str, Any]:
@@ -26,8 +29,8 @@ def get_saved_config() -> Dict[str, Any]:
     try:
         if config_file.exists():
             return json.loads(config_file.read_text(encoding='utf-8'))
-    except Exception:
-        pass # Ignore errors reading config
+    except Exception as e:
+        logger.debug(f"Error reading saved config: {e}")
     return {}
 
 def set_default_dir(directory: str) -> None:
@@ -39,7 +42,8 @@ def set_default_dir(directory: str) -> None:
         if config_file.exists():
             try:
                 config_data = json.loads(config_file.read_text(encoding='utf-8'))
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Error reading existing config, starting fresh: {e}")
                 pass  # Start fresh if the file is corrupted
 
         # Update with new default directory
@@ -59,7 +63,8 @@ def save_config(config_to_save: Dict[str, Any]) -> None:
         if config_file.exists():
             try:
                 existing_config = json.loads(config_file.read_text(encoding='utf-8'))
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Error reading existing config for save, starting fresh: {e}")
                 pass  # Start fresh if the file is corrupted
 
         # Filter out unwanted keys (like root_dir which changes per run)
@@ -67,7 +72,7 @@ def save_config(config_to_save: Dict[str, Any]) -> None:
         save_keys = {
             'style', 'max_depth', 'show_hidden', 'colorize', 'show_size',
             'use_smart_exclude', 'export_for_llm', 'max_llm_file_size',
-            'llm_content_extensions', 'llm_indicators', 'verbose', 'skip_errors', 'add_file_marker',
+            'llm_content_extensions', 'llm_indicators', 'verbose', 'skip_errors',
             # Interactive selections for LLM can be saved
             'interactive_file_type_includes_for_llm',
             'interactive_dir_excludes_for_llm'

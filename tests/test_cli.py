@@ -7,8 +7,8 @@ from pathlib import Path
 # from .conftest import COMMON_DIR_EXCLUDES # Not directly used here
 # Must import AFTER sys.path manipulation in conftest
 try:
-    from dirtree_lib.dirtree_cli import parse_args
-    from dirtree_lib.dirtree_utils import parse_size_string # Used by main()
+    from dirtree.dirtree_cli import parse_args
+    from dirtree.dirtree_utils import parse_size_string # Used by main()
 except ImportError:
      pytest.skip("Skipping CLI tests, import failed.", allow_module_level=True)
 
