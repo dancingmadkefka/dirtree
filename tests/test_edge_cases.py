@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 import shutil
 from typing import List
+import re
 
 # Use the conftest.py setup to ensure imports work
 from .conftest import COMMON_DIR_EXCLUDES, create_test_structure, run_dirtree_and_capture # Updated import
@@ -32,7 +33,6 @@ def assert_tree_not_contains(output: str, items: List[str]):
     Uses word boundary matching to avoid false positives from substrings.
     """
     found = []
-    import re
     for item in items:
         # Check if item appears as a whole word/segment, not as substring
         # Match item followed by whitespace, newline, or tree characters like │├└`[
