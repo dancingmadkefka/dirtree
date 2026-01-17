@@ -26,7 +26,6 @@ wheels/
 MANIFEST
 
 # PyInstaller
-#  Usually these files are written by a PyInstaller build script
 *.manifest
 *.spec
 
@@ -47,6 +46,14 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
+# Linting / formatting
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.black/
+.pre-commit-cache/
+
 # Environments
 .env
 .venv
@@ -56,15 +63,20 @@ ENV/
 env.bak/
 venv.bak/
 
-# IDE specific files
+# IDE specific
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
+*~
+.DS_Store
+Thumbs.db
 
 # Project specific
 *.log
 *.tmp
-
-# Generated exports
 dirtree_export_*.md
+
+# User config
+dirtree_config.json
