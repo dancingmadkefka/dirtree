@@ -2,6 +2,7 @@
 import pytest
 import sys
 import os
+import traceback
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -9,15 +10,15 @@ from typing import List, Dict, Any
 package_root = Path(__file__).parent.parent
 sys.path.insert(0, str(package_root))
 # Ensure the library modules can be imported
-sys.path.insert(0, str(package_root / 'dirtree_lib'))
+sys.path.insert(0, str(package_root / 'dirtree'))
 
 # Now attempt the imports
 try:
-    from dirtree_lib.dirtree_core import IntuitiveDirTree
-    from dirtree_lib.dirtree_config import COMMON_DIR_EXCLUDES, COMMON_FILE_EXCLUDES # Updated
-    from dirtree_lib.dirtree_cli import parse_args
+    from dirtree.dirtree_core import IntuitiveDirTree
+    from dirtree.dirtree_config import COMMON_DIR_EXCLUDES, COMMON_FILE_EXCLUDES # Updated
+    from dirtree.dirtree_cli import parse_args
 except ImportError as e:
-    pytest.fail(f"Failed to import dirtree_lib components: {e}\n"
+    pytest.fail(f"Failed to import dirtree components: {e}\n"
                 f"Ensure the package is installed correctly (e.g., 'pip install -e .') "
                 f"or PYTHONPATH is set up.\n"
                 f"Current sys.path: {sys.path}")
