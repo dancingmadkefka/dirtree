@@ -96,3 +96,15 @@ def test_cli_behavior_args(tmp_path):
 ])
 def test_parse_size_string_util(size_str, expected_bytes):
     assert parse_size_string(size_str, default=50 * 1024) == expected_bytes
+
+def test_cli_dry_run_flag(tmp_path):
+    """Test that --dry-run flag is parsed correctly."""
+    args = run_parse_args([str(tmp_path), "--dry-run"])
+    assert args.dry_run is True
+    assert args.export_for_llm is False  # Default, should not be affected by dry-run
+
+def test_cli_dry_run_with_llm(tmp_path):
+    """Test that --dry-run with --llm keeps LLM export enabled for stats."""
+    args = run_parse_args([str(tmp_path), "--dry-run", "--llm"])
+    assert args.dry_run is True
+    assert args.export_for_llm is True  # Should remain True for stats calculation

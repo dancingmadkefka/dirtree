@@ -134,6 +134,7 @@ class IntuitiveDirTree:
         self.llm_files_considered = 0
         self.llm_files_included_content = 0
         self.llm_total_content_size_bytes = 0
+        self.llm_estimated_size_bytes = 0  # Accumulated during traversal for dry-run estimates
 
         self._log = lambda msg, level="info": log_message(msg, level, self.verbose, self.colorize)
         self._log_config()
@@ -290,7 +291,7 @@ class IntuitiveDirTree:
 
                     if is_llm_content_included:
                         self.llm_files_included_content += 1
-                        # Size accumulation will happen in generate_llm_export after reading
+                        self.llm_estimated_size_bytes += size_bytes
 
                     llm_indicator_str = self._get_llm_indicator(is_llm_content_included)
 
@@ -374,6 +375,7 @@ class IntuitiveDirTree:
         self.llm_files_considered = 0
         self.llm_files_included_content = 0
         self.llm_total_content_size_bytes = 0
+        self.llm_estimated_size_bytes = 0
         self._seen_paths_build = set()
 
         root_color = self._get_color(self.root_dir)
@@ -499,8 +501,6 @@ class IntuitiveDirTree:
             print(f"\nLLM Export Estimates:")
             print(f"  Files considered:  {self.llm_files_considered:,}")
             print(f"  Files to include:  {self.llm_files_included_content:,}")
-            if self.llm_files_included_content > 0:
-                avg_size = self.max_llm_file_size // 2  # Rough estimate
-                est_size = self.llm_files_included_content * avg_size
-                print(f"  Est. export size:  {format_bytes(est_size)}")
+            if self.llm_estimated_size_bytes > 0:
+                print(f"  Est. export size:  {format_bytes(self.llm_estimated_size_bytes)}")
         print("="*60)

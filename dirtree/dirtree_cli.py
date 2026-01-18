@@ -311,10 +311,10 @@ def main():
             config['interactive_prompts'] = not args.skip_errors
             config['dry_run'] = args.dry_run
 
-            # If dry-run, disable output file generation
+            # If dry-run, notify user but keep LLM export enabled for statistics
+            # The actual file writing is skipped in IntuitiveDirTree.run()
             if config['dry_run']:
                 print(f"{Colors.CYAN}Dry run mode: scanning without generating output.{Colors.RESET}")
-                config['export_for_llm'] = False
 
 
         # --- Instantiate and Run ---
