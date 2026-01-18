@@ -182,6 +182,12 @@ def parse_args() -> argparse.Namespace:
     # --- Behavior Group ---
     behavior_group = parser.add_argument_group('Behavior Options')
     behavior_group.add_argument(
+        '--dry-run',
+        action='store_true',
+        default=False,
+        help="Scan and calculate statistics without generating output.\nUseful for previewing before full export."
+    )
+    behavior_group.add_argument(
         '-v', '--verbose',
         action='store_true',
         default=False,
@@ -303,6 +309,12 @@ def main():
             config['verbose'] = args.verbose
             config['skip_errors'] = args.skip_errors
             config['interactive_prompts'] = not args.skip_errors
+            config['dry_run'] = args.dry_run
+
+            # If dry-run, notify user but keep LLM export enabled for statistics
+            # The actual file writing is skipped in IntuitiveDirTree.run()
+            if config['dry_run']:
+                print(f"{Colors.CYAN}Dry run mode: scanning without generating output.{Colors.RESET}")
 
 
         # --- Instantiate and Run ---

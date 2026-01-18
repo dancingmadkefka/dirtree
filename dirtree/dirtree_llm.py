@@ -157,7 +157,7 @@ def read_file_content(path: Path, max_size_to_read: int, log_func: Callable) -> 
         # Return the string and its byte size after potential truncation and encoding
         return content_str, len(content_str.encode('utf-8', errors='replace'))
 
-    except Exception as e:
+    except (PermissionError, OSError, UnicodeError) as e:
         log_func(f"LLM Export: Error reading file '{path.name}': {e}", "error")
         return None, 0
 
@@ -222,7 +222,7 @@ def generate_llm_export(
 
         try:
             file_size = item_path.stat().st_size
-        except Exception as e_stat:
+        except (PermissionError, OSError) as e_stat:
             log_func(f"LLM Export: Could not stat '{item_path}' for LLM content: {e_stat}", "warning")
             continue # Skip if cannot stat
 
@@ -262,6 +262,6 @@ def generate_llm_export(
             f.write("\n".join(export_lines))
         log_func(f"LLM export successfully created: {export_filepath}", "success")
         return export_filepath, total_content_bytes, files_with_content_included
-    except Exception as e_write:
+    except (PermissionError, OSError) as e_write:
         log_func(f"Error writing LLM export file '{export_filepath}': {e_write}", "error")
         return None, 0, 0

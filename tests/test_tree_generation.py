@@ -187,3 +187,48 @@ def test_tree_empty_dir_display(tmp_path, run_dirtree_and_capture):
     out, _, _, _, _ = run_dirtree_and_capture(config)
 
     assert_tree_output_contains(out, ["completely_empty_dir", "non_empty_dir", "file.txt"])
+
+
+def test_dry_run_mode_basic(tmp_path, run_dirtree_and_capture):
+    """Test dry-run mode shows summary without generating tree output."""
+    root_dir = tmp_path / "dry_run_test"
+    root_dir.mkdir()
+    (root_dir / "file1.py").write_text("print('hello')")
+    (root_dir / "file2.txt").write_text("some text")
+    (root_dir / "subdir").mkdir()
+    (root_dir / "subdir" / "file3.js").write_text("console.log('test')")
+
+    config = {'root_dir': str(root_dir), 'dry_run': True, 'colorize': False}
+    out, _, _, _, _ = run_dirtree_and_capture(config)
+
+    # Should contain dry-run summary
+    assert "DRY RUN SUMMARY" in out
+    assert "Items scanned:" in out
+    assert "Items listed:" in out
+    # Should NOT contain the tree visualization (no branch characters)
+    assert not any(c in out for c in ['│', '├', '└', '|-', '`-'])
+
+
+def test_dry_run_mode_with_llm_stats(tmp_path, run_dirtree_and_capture):
+    """Test dry-run mode calculates LLM statistics when --llm is enabled."""
+    root_dir = tmp_path / "dry_run_llm_test"
+    root_dir.mkdir()
+    (root_dir / "script.py").write_text("x = 1")
+    (root_dir / "data.json").write_text('{"key": "value"}')
+    (root_dir / "binary.dat").write_bytes(b'\x00\x01\x02\x03')
+
+    config = {
+        'root_dir': str(root_dir),
+        'dry_run': True,
+        'export_for_llm': True,
+        'max_llm_file_size': 10 * 1024,
+        'colorize': False
+    }
+    out, _, _, _, _ = run_dirtree_and_capture(config)
+
+    # Should contain LLM statistics
+    assert "DRY RUN SUMMARY" in out
+    assert "LLM Export Estimates:" in out
+    assert "Files considered:" in out
+    # Should show estimated size based on actual file sizes
+    assert "Est. export size:" in out
