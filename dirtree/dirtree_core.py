@@ -67,18 +67,19 @@ class IntuitiveDirTree:
             # Behavior
             verbose: bool = False, interactive_prompts: bool = True, skip_errors: bool = False,
             output_dir: Optional[str] = None,
-            add_file_marker: bool = True
+            add_file_marker: bool = True,
+            dry_run: bool = False
     ):
         try:
             self.root_dir = Path(root_dir).resolve(strict=True)
             if not self.root_dir.is_dir():
                  raise NotADirectoryError(f"Path is not a directory: '{self.root_dir}'")
         except FileNotFoundError:
-            raise FileNotFoundError(f"Starting directory not found: '{root_dir}'")
+            raise FileNotFoundError(f"Starting directory not found: '{root_dir}'") from None
         except NotADirectoryError as e:
              raise e
-        except Exception as e:
-            raise ValueError(f"Error accessing starting directory '{root_dir}': {e}")
+        except (PermissionError, OSError) as e:
+            raise ValueError(f"Error accessing starting directory '{root_dir}': {e}") from e
 
         self.style_name = style.lower()
         self.style_config = TreeStyle.get_style(self.style_name)
@@ -115,6 +116,7 @@ class IntuitiveDirTree:
 
         self.output_dir = Path(output_dir) if output_dir else Path.cwd()
         self.add_file_marker = add_file_marker
+        self.dry_run = dry_run
 
         self.smart_dir_excludes = COMMON_DIR_EXCLUDES if self.use_smart_exclude else []
         self.smart_file_excludes_for_llm = COMMON_FILE_EXCLUDES if self.use_smart_exclude else []
@@ -170,6 +172,20 @@ class IntuitiveDirTree:
         ext = path.suffix.lower().lstrip(".") if path.suffix else ""
         return self._filetype_emojis.get(ext, "📄")
 
+    def _get_llm_indicator(self, is_included: bool) -> str:
+        """Return the LLM indicator string based on inclusion status and settings."""
+        if self.llm_indicators == "none":
+            return ""
+        if is_included:
+            color = Colors.GREEN if self.colorize else ""
+            reset = Colors.RESET if self.colorize else ""
+            return f" {color}[LLM✓]{reset}"
+        elif self.llm_indicators == "all":
+            color = Colors.GRAY if self.colorize else ""
+            reset = Colors.RESET if self.colorize else ""
+            return f" {color}[LLM✗]{reset}"
+        return ""
+
     def _build_tree_recursive(
         self,
         current_path: Path,
@@ -191,14 +207,14 @@ class IntuitiveDirTree:
                 tree_lines.append(f"{prefix}{Colors.YELLOW}...(skipped symlink loop){Colors.RESET}")
                 return tree_lines, listed_paths_in_tree
             self._seen_paths_build.add(real_path)
-        except Exception as e:
+        except (PermissionError, OSError) as e:
             self._log(f"Could not resolve '{current_path}' during build: {e}. Skipping recursion.", "warning")
             return tree_lines, listed_paths_in_tree
 
         try:
             entries = sorted(list(os.scandir(current_path)), key=lambda e: e.name.lower())
             self.total_items_scanned += len(entries)
-        except Exception as e:
+        except (PermissionError, OSError) as e:
             should_skip, self.skip_errors = handle_error(
                 current_path, e, self._log, self.colorize, self.skip_errors, self.interactive_prompts, phase="listing directory"
             )
@@ -255,6 +271,7 @@ class IntuitiveDirTree:
 
             # --- LLM Indicator ---
             llm_indicator_str = ""
+            is_llm_content_included = False
             if self.export_for_llm and not is_entry_dir: # Only files get LLM indicators for content
                 self.llm_files_considered += 1
                 try:
@@ -274,18 +291,10 @@ class IntuitiveDirTree:
                     if is_llm_content_included:
                         self.llm_files_included_content += 1
                         # Size accumulation will happen in generate_llm_export after reading
-                        if self.llm_indicators != "none":
-                            if self.colorize:
-                                llm_indicator_str = f" {Colors.GREEN}[LLM✓]{Colors.RESET}"
-                            else:
-                                llm_indicator_str = " [LLM✓]"
-                    elif self.llm_indicators == "all":
-                        if self.colorize:
-                            llm_indicator_str = f" {Colors.GRAY}[LLM✗]{Colors.RESET}"
-                        else:
-                            llm_indicator_str = " [LLM✗]"
 
-                except Exception as e_llm_check:
+                    llm_indicator_str = self._get_llm_indicator(is_llm_content_included)
+
+                except OSError as e_llm_check:
                     self._log(f"Could not check LLM inclusion for '{entry_path}': {e_llm_check}", "warning")
 
             # --- Formatting for Tree Line ---
@@ -309,7 +318,7 @@ class IntuitiveDirTree:
                         size_info_str = f" ({Colors.GRAY}{format_bytes(size_bytes)}{reset})"
                     else:
                         size_info_str = f" ({format_bytes(size_bytes)})"
-                except Exception as e_size:
+                except (PermissionError, OSError) as e_size:
                     self._log(f"Could not get size for '{entry_path}': {e_size}", "warning")
                     if self.colorize:
                         size_info_str = f" ({Colors.RED}Size N/A{reset})"
@@ -338,7 +347,7 @@ class IntuitiveDirTree:
                     listed_paths_in_tree.extend(sub_paths)
                 except SystemExit:
                     raise
-                except Exception as e_recurse:
+                except (PermissionError, OSError, RecursionError) as e_recurse:
                     should_skip, self.skip_errors = handle_error(
                         entry_path, e_recurse, self._log, self.colorize, self.skip_errors, self.interactive_prompts, phase="recursing"
                     )
@@ -448,6 +457,10 @@ class IntuitiveDirTree:
     def run(self) -> None:
         self.generate_tree()
 
+        if self.dry_run:
+            self._print_dry_run_summary()
+            return
+
         llm_export_file = None
         if self.export_for_llm and self._cached_tree_lines and self._cached_listed_paths_in_tree:
             llm_export_file, self.llm_total_content_size_bytes, self.llm_files_included_content = generate_llm_export(
@@ -471,3 +484,23 @@ class IntuitiveDirTree:
             # A more accurate 'considered' count would be inside generate_llm_export before should_include.
 
         self.print_results(llm_export_path=llm_export_file)
+
+    def _print_dry_run_summary(self) -> None:
+        """Print statistics summary without generating output."""
+        print("\n" + "="*60)
+        print("DRY RUN SUMMARY")
+        print("="*60)
+        print(f"Items scanned:    {self.total_items_scanned:,}")
+        print(f"Items filtered:   {self.total_items_scanned - self.items_listed_in_tree:,}")
+        print(f"Items listed:     {self.items_listed_in_tree:,}")
+        if self.skipped_items:
+            print(f"Errors skipped:   {len(self.skipped_items)}")
+        if self.llm_files_considered > 0:
+            print(f"\nLLM Export Estimates:")
+            print(f"  Files considered:  {self.llm_files_considered:,}")
+            print(f"  Files to include:  {self.llm_files_included_content:,}")
+            if self.llm_files_included_content > 0:
+                avg_size = self.max_llm_file_size // 2  # Rough estimate
+                est_size = self.llm_files_included_content * avg_size
+                print(f"  Est. export size:  {format_bytes(est_size)}")
+        print("="*60)
