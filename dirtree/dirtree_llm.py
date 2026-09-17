@@ -7,6 +7,7 @@ Handles reading file content and generating a Markdown export suitable for LLMs.
 import sys
 import os
 import re
+import codecs
 from pathlib import Path
 from datetime import datetime
 from typing import List, Set, Optional, Dict, Any, Callable, Tuple
@@ -53,6 +54,17 @@ def should_include_content_for_llm(
         if fnmatch.fnmatch(file_name, pattern) or fnmatch.fnmatch(relative_path_str, pattern):
             log_func(f"LLM Content: SKIP '{relative_path_str}' (matches CLI exclude pattern '{pattern}')", "debug")
             return False
+
+    # Check CLI exclusions against ancestors strictly below root. Keep paths
+    # lexical (do not resolve symlinks), and never inspect root or its parents.
+    for ancestor in file_path.relative_to(root_dir).parents:
+        if not ancestor.parts:
+            break
+        ancestor_path_str = ancestor.as_posix()
+        for pattern in cli_exclude_patterns:
+            if fnmatch.fnmatch(ancestor.name, pattern) or fnmatch.fnmatch(ancestor_path_str, pattern):
+                log_func(f"LLM Content: SKIP '{relative_path_str}' (inside CLI excluded dir '{ancestor_path_str}' matching '{pattern}')", "debug")
+                return False
 
     # 2. Check if inside a Smart Excluded Directory
     current_parent = file_path.parent
@@ -121,35 +133,35 @@ def read_file_content(path: Path, max_size_to_read: int, log_func: Callable) -> 
     Safely reads file content, respecting size limits, handling encodings.
     Returns (content_string_or_None, actual_bytes_of_string_or_0).
     """
+    if max_size_to_read < 0:
+        raise ValueError("max_size_to_read must be nonnegative")
+
     try:
-        # Read as bytes first to correctly handle truncation before decoding
-        file_bytes = path.read_bytes()
-        actual_file_size = len(file_bytes)
+        # One lookahead byte detects truncation without reading the whole file.
+        with path.open("rb") as source:
+            sample = source.read(max_size_to_read + 1)
 
-        if actual_file_size == 0:
-            return "", 0 # Empty file
+        if not sample:
+            return "", 0
 
-        truncated = False
-        if actual_file_size > max_size_to_read:
-            file_bytes = file_bytes[:max_size_to_read]
-            truncated = True
-            log_func(f"LLM Export: Content for '{path.name}' was truncated to {format_bytes(max_size_to_read)} (original {format_bytes(actual_file_size)}).", "warning")
+        truncated = len(sample) > max_size_to_read
+        file_bytes = sample[:max_size_to_read]
+        if truncated:
+            log_func(f"LLM Export: Content for '{path.name}' was truncated to {format_bytes(max_size_to_read)}.", "warning")
 
-        content_str = None
-        # Try common encodings
-        encodings_to_try = ['utf-8', 'latin-1', sys.getdefaultencoding()]
-        for enc in encodings_to_try:
-            try:
-                content_str = file_bytes.decode(enc)
-                log_func(f"LLM Export: Read '{path.name}' with encoding '{enc}'.", "debug")
-                break
-            except UnicodeDecodeError:
-                log_func(f"LLM Export: Decoding '{path.name}' with '{enc}' failed.", "debug")
-                continue
-
-        if content_str is None: # All decodes failed
-            content_str = file_bytes.decode('utf-8', errors='replace') # Force decode with replacements
-            log_func(f"LLM Export: Force decoded '{path.name}' with UTF-8 (replacing errors).", "warning")
+        try:
+            # Decode the retained prefix independently. Lookahead may validate
+            # a pending UTF-8 sequence, but must not invalidate a complete prefix.
+            decoder = codecs.getincrementaldecoder('utf-8')()
+            content_str = decoder.decode(file_bytes, final=not truncated)
+            if truncated and decoder.getstate()[0]:
+                # Discard any character completed using bytes beyond the limit.
+                decoder.decode(sample[max_size_to_read:], final=False)
+            encoding = 'utf-8'
+        except UnicodeDecodeError:
+            content_str = file_bytes.decode('latin-1')
+            encoding = 'latin-1'
+        log_func(f"LLM Export: Read '{path.name}' with encoding '{encoding}'.", "debug")
 
         if truncated:
             content_str += "\n... [TRUNCATED]"
@@ -173,6 +185,11 @@ def create_clean_tree_for_markdown(tree_lines: List[str]) -> List[str]:
         clean_line = llm_indicator_pattern.sub('', clean_line) # Remove LLM indicators
         clean_lines.append(clean_line)
     return clean_lines
+
+def _markdown_fence(content: str) -> str:
+    longest_run = max((len(match.group(0)) for match in re.finditer(r'`+', content)), default=0)
+    return '`' * max(3, longest_run + 1)
+
 
 # --- Export Generation ---
 def generate_llm_export(
@@ -203,9 +220,11 @@ def generate_llm_export(
     export_lines.append(f"# Directory Tree for: {root_dir.name}")
     export_lines.append(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     export_lines.append("\n## Directory Structure")
-    export_lines.append("```")
-    export_lines.extend(create_clean_tree_for_markdown(tree_lines))
-    export_lines.append("```\n")
+    clean_tree_lines = create_clean_tree_for_markdown(tree_lines)
+    tree_fence = _markdown_fence("\n".join(clean_tree_lines))
+    export_lines.append(tree_fence)
+    export_lines.extend(clean_tree_lines)
+    export_lines.append(tree_fence + "\n")
 
     export_lines.append("## File Contents\n")
     if llm_content_extensions_set is not None:
@@ -239,10 +258,11 @@ def generate_llm_export(
                 relative_path_str = item_path.relative_to(root_dir).as_posix()
                 export_lines.append(f"### `{relative_path_str}`\n")
                 ext = item_path.suffix.lower().lstrip(".")
-                lang_hint = ext if ext else ""
-                export_lines.append(f"```{lang_hint}")
+                lang_hint = ext if re.fullmatch(r'[A-Za-z0-9_+-]+', ext) else ""
+                content_fence = _markdown_fence(content_str)
+                export_lines.append(f"{content_fence}{lang_hint}")
                 export_lines.append(content_str)
-                export_lines.append("```\n")
+                export_lines.append(content_fence + "\n")
 
                 total_content_bytes += content_bytes_read
                 files_with_content_included += 1
@@ -258,10 +278,18 @@ def generate_llm_export(
 
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
-        with export_filepath.open("w", encoding="utf-8") as f:
-            f.write("\n".join(export_lines))
-        log_func(f"LLM export successfully created: {export_filepath}", "success")
-        return export_filepath, total_content_bytes, files_with_content_included
+        for candidate_index in range(100):
+            candidate_name = export_filename if candidate_index == 0 else f"{Path(export_filename).stem}_{candidate_index}.md"
+            export_filepath = output_dir / candidate_name
+            try:
+                export_file = export_filepath.open("x", encoding="utf-8", newline="")
+            except FileExistsError:
+                continue
+            with export_file as f:
+                f.write("\n".join(export_lines))
+            log_func(f"LLM export successfully created: {export_filepath}", "success")
+            return export_filepath, total_content_bytes, files_with_content_included
+        raise FileExistsError("All 100 LLM export filename candidates already exist")
     except (PermissionError, OSError) as e_write:
         log_func(f"Error writing LLM export file '{export_filepath}': {e_write}", "error")
         return None, 0, 0
