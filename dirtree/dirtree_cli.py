@@ -169,7 +169,7 @@ def parse_args() -> argparse.Namespace:
         metavar='EXT',
         default=None, # None means use default logic
         dest='llm_content_extensions',
-        help="File extensions (e.g., py, js) to include content for in LLM export.\nOverrides default logic. Can be used multiple times."
+        help="File extensions (e.g., py, js) to include content for in LLM export.\nOverrides default logic. Accepts comma-separated values (--llm-ext py,md)\nor the flag repeated (--llm-ext py --llm-ext md)."
     )
     llm_group.add_argument(
         '--llm-output-dir',
@@ -238,8 +238,11 @@ def main():
             print(f"Interactive mode available: {pick_available}")
 
         # --- Determine Configuration (Interactive vs. Args) ---
-        # Force interactive if -i is used, or if no directory is given and pick is available
-        use_interactive = args.interactive or (args.directory is None and pick_available)
+        # Only auto-launch the interactive picker when we actually have a terminal.
+        # Without this guard, a bare `dirtree` run in a non-TTY context (piped output,
+        # CI, IDE task runner) would block forever waiting on the picker's input.
+        interactive_capable = pick_available and sys.stdin.isatty() and sys.stdout.isatty()
+        use_interactive = args.interactive or (args.directory is None and interactive_capable)
 
         if use_interactive:
             if not pick_available:
@@ -289,7 +292,17 @@ def main():
                 except ValueError as e_size:
                      print(f"{Colors.RED}Error: Invalid LLM max size format '{args.llm_max_size}'. {e_size}{Colors.RESET}", file=sys.stderr)
                      sys.exit(1)
-                config['llm_content_extensions'] = args.llm_content_extensions # Pass list or None
+                # Accept both repeated flags (--llm-ext py --llm-ext md) and
+                # comma-separated values (--llm-ext py,md), as documented in the README.
+                if args.llm_content_extensions:
+                    config['llm_content_extensions'] = [
+                        ext.strip()
+                        for value in args.llm_content_extensions
+                        for ext in value.split(',')
+                        if ext.strip()
+                    ]
+                else:
+                    config['llm_content_extensions'] = None
                 config['llm_indicators'] = args.llm_indicators
 
                 if args.llm_output_dir:

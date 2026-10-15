@@ -36,6 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 windows = ["windows-curses>=2.2.0"]
+test = ["pytest>=7.0"]
 
 [project.scripts]
 dirtree = "dirtree.dirtree_cli:main"

@@ -19,7 +19,7 @@
 ## Architecture
 
 ```
-dirtree.py → dirtree_cli.py → IntuitiveDirTree (dirtree_core.py)
+dirtree_cli.py (console script `dirtree`) → IntuitiveDirTree (dirtree_core.py)
                                     ↓
                         ┌───────────┼───────────┐
                         ↓           ↓           ↓
@@ -36,7 +36,7 @@ dirtree.py → dirtree_cli.py → IntuitiveDirTree (dirtree_core.py)
 |------|---------|
 | `dirtree/dirtree_core.py` | `IntuitiveDirTree` - main orchestrator |
 | `dirtree/dirtree_filters.py` | `passes_tree_filters()` - core filtering logic |
-| `dirtree/dirtree_llm.py` | `LlmExporter` - markdown generation |
+| `dirtree/dirtree_llm.py` | `generate_llm_export()` - markdown generation |
 | `dirtree/dirtree_config.py` | Smart exclude patterns |
 | `tests/conftest.py` | Test fixtures |
 
