@@ -248,3 +248,22 @@ def test_llm_export_max_size_respected(tmp_path, run_dirtree_and_capture):
 
     assert "large.txt [LLM✗]" in out_tree # File too large, marked as excluded
     assert_llm_content_absent(llm_content, "large.txt") # Content not included due to size
+
+
+def test_generated_export_files_excluded_from_llm_content(tmp_path, run_dirtree_and_capture):
+    """dirtree's own export reports must not be re-ingested into a new LLM export."""
+    root = tmp_path / "gen_proj"
+    root.mkdir()
+    (root / "keep.py").write_text("print('keep')", encoding="utf-8")
+    report = root / "dirtree_export_gen_proj_20200101_000000.md"
+    report.write_text("OLD_REPORT_MARKER_XYZ", encoding="utf-8")
+
+    _, _, _, _, export_file = run_dirtree_and_capture({
+        'root_dir': str(root), 'export_for_llm': True,
+        'output_dir': str(tmp_path / "out"),
+        'use_smart_exclude': True, 'colorize': False,
+    })
+    assert export_file is not None
+    llm_content = read_llm_export_file(export_file)
+    assert "OLD_REPORT_MARKER_XYZ" not in llm_content
+    assert_llm_content_present(llm_content, "keep.py", "print('keep')")

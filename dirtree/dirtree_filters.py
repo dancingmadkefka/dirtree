@@ -72,7 +72,8 @@ def passes_tree_filters(
     cli_exclude_patterns: List[str],
     smart_dir_excludes_for_tree: List[str], # Only dir patterns from smart exclude
     show_hidden: bool,
-    log_func: Callable
+    log_func: Callable,
+    smart_file_excludes_for_tree: Optional[List[str]] = None, # Item-level file patterns (e.g. generated reports)
 ) -> Tuple[bool, Optional[str]]: # Returns (passes, reason_if_failed)
     """
     Checks if a path should appear in the tree display.
@@ -109,6 +110,14 @@ def passes_tree_filters(
     # This logic needs to be woven into the recursive build or `should_recurse_for_tree`.
     # For `passes_tree_filters` on an individual item, if its parent was CLI_EXCLUDED and thus not recursed, this item wouldn't even be checked.
     # So, we only need to check the item itself against CLI_EXCLUDE here.
+
+    # 2b. Check item-level file excludes (e.g. dirtree's own generated reports).
+    # These are hidden from the tree entirely, unlike COMMON_FILE_EXCLUDES which
+    # only keep a file's content out of the LLM export.
+    for pattern_str in (smart_file_excludes_for_tree or []):
+        regex = _compile_pattern(pattern_str)
+        if regex.fullmatch(name) or (relative_path_str != "." and regex.fullmatch(relative_path_str)):
+            return False, f"matches generated-file exclude pattern '{pattern_str}'"
 
     # 3. Check if inside a Smart Excluded Directory (e.g. file inside node_modules)
     # This prevents contents of smart_excluded_dirs from appearing.

@@ -253,3 +253,25 @@ def test_dry_run_mode_with_llm_stats(tmp_path, run_dirtree_and_capture):
     assert "Files considered:" in out
     # Should show estimated size based on actual file sizes
     assert "Est. export size:" in out
+
+
+def test_generated_export_files_hidden_from_tree(tmp_path, run_dirtree_and_capture):
+    """dirtree's own export reports must not reappear in later tree runs."""
+    root = tmp_path / "gen_proj"
+    root.mkdir()
+    (root / "keep.py").write_text("print('keep')", encoding="utf-8")
+    report_name = "dirtree_export_gen_proj_20200101_000000.md"
+    (root / report_name).write_text("# old report", encoding="utf-8")
+
+    # Smart exclude ON: the generated report is hidden from the tree.
+    out, _, _, _, _ = run_dirtree_and_capture({
+        'root_dir': str(root), 'use_smart_exclude': True, 'colorize': False,
+    })
+    assert_tree_output_contains(out, ["keep.py"])
+    assert_tree_output_not_contains(out, [report_name])
+
+    # Smart exclude OFF: it is shown again (opt-out behaviour is preserved).
+    out2, _, _, _, _ = run_dirtree_and_capture({
+        'root_dir': str(root), 'use_smart_exclude': False, 'colorize': False,
+    })
+    assert_tree_output_contains(out2, [report_name])

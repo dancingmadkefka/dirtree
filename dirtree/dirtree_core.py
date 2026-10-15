@@ -17,7 +17,7 @@ try:
     from .dirtree_filters import passes_tree_filters, should_recurse_for_tree, matches_any_include_pattern
     from .dirtree_utils import format_bytes, log_message, handle_error
     from .dirtree_llm import generate_llm_export, should_include_content_for_llm
-    from .dirtree_config import COMMON_DIR_EXCLUDES, COMMON_FILE_EXCLUDES
+    from .dirtree_config import COMMON_DIR_EXCLUDES, COMMON_FILE_EXCLUDES, DIRTREE_GENERATED_FILE_PATTERNS
 except ImportError:
     # Fallback for direct execution or testing
     print("Warning: Running core module potentially outside of package context.", file=sys.stderr)
@@ -38,6 +38,7 @@ except ImportError:
     def should_include_content_for_llm(*args, **kwargs): return True
     COMMON_DIR_EXCLUDES = []
     COMMON_FILE_EXCLUDES = []
+    DIRTREE_GENERATED_FILE_PATTERNS = []
 
 
 # --- Main Class ---
@@ -121,6 +122,8 @@ class IntuitiveDirTree:
 
         self.smart_dir_excludes = COMMON_DIR_EXCLUDES if self.use_smart_exclude else []
         self.smart_file_excludes_for_llm = COMMON_FILE_EXCLUDES if self.use_smart_exclude else []
+        # dirtree's own generated reports: hidden from the tree and left out of LLM content.
+        self.generated_file_excludes = DIRTREE_GENERATED_FILE_PATTERNS if self.use_smart_exclude else []
 
         self.skipped_items: List[Tuple[str, str]] = []
         self.total_items_scanned = 0
@@ -152,6 +155,7 @@ class IntuitiveDirTree:
         if self.use_smart_exclude:
             self._log(f"    Smart Dir Excludes (tree): {self.smart_dir_excludes}", "debug")
             self._log(f"    Smart File Excludes (LLM): {self.smart_file_excludes_for_llm}", "debug")
+            self._log(f"    Generated File Excludes (tree+LLM): {self.generated_file_excludes}", "debug")
 
         self._log(f"  Interactive Dir Excludes (LLM): {self.interactive_dir_excludes_llm}", "debug")
         self._log(f"  LLM Content Extensions (final): {self.llm_content_extensions_set or 'Default (non-binary)'}", "debug")
@@ -257,7 +261,8 @@ class IntuitiveDirTree:
                 entry_path, self.root_dir,
                 self.cli_include_patterns, self.cli_exclude_patterns,
                 self.smart_dir_excludes, # Only dir part of smart excludes for tree structure
-                self.show_hidden, self._log
+                self.show_hidden, self._log,
+                smart_file_excludes_for_tree=self.generated_file_excludes
             )
             if not should_display_entry:
                 self._log(f"Tree Filter: '{entry_path.name}' HIDDEN from tree. Reason: {tree_exclude_reason}", "debug")
@@ -286,7 +291,7 @@ class IntuitiveDirTree:
                         entry_path, self.root_dir, size_bytes, self.max_llm_file_size,
                         self.llm_content_extensions_set,
                         self.cli_exclude_patterns, # CLI excludes affect LLM
-                        self.smart_dir_excludes, self.smart_file_excludes_for_llm, # Smart excludes affect LLM
+                        self.smart_dir_excludes, self.smart_file_excludes_for_llm + self.generated_file_excludes, # Smart excludes affect LLM
                         self.interactive_dir_excludes_llm, # Interactive dir excludes affect LLM
                         self._log
                     )
@@ -496,7 +501,7 @@ class IntuitiveDirTree:
                 llm_content_extensions_set=self.llm_content_extensions_set,
                 cli_exclude_patterns=self.cli_exclude_patterns,
                 smart_dir_excludes=self.smart_dir_excludes,
-                smart_file_excludes_for_llm=self.smart_file_excludes_for_llm,
+                smart_file_excludes_for_llm=self.smart_file_excludes_for_llm + self.generated_file_excludes,
                 interactive_dir_excludes_llm=self.interactive_dir_excludes_llm,
                 log_func=self._log,
                 output_dir=self.output_dir,
