@@ -8,6 +8,7 @@ import sys
 import argparse
 from pathlib import Path
 import traceback
+from typing import List, Optional
 
 # --- Imports from other modules ---
 try:
@@ -225,11 +226,29 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 # --- Main Execution Logic ---
+def parse_llm_extensions(values: Optional[List[str]]) -> Optional[List[str]]:
+    """Normalize --llm-ext values.
+
+    Supports comma-separated values (--llm-ext py,md) and repeated flags
+    (--llm-ext py --llm-ext md). Returns None when nothing usable was given.
+    """
+    if not values:
+        return None
+    exts = [ext.strip() for value in values for ext in value.split(',') if ext.strip()]
+    return exts or None
+
+
 def main():
     """Main function to run the directory tree generator."""
     try:
         args = parse_args()
         config = {}
+        # Respect --no-color / non-TTY output for all CLI-level messages.
+        use_color = args.colorize
+        c_red = Colors.RED if use_color else ""
+        c_yellow = Colors.YELLOW if use_color else ""
+        c_cyan = Colors.CYAN if use_color else ""
+        c_reset = Colors.RESET if use_color else ""
 
         # Show version info
         if args.debug:
@@ -246,7 +265,7 @@ def main():
 
         if use_interactive:
             if not pick_available:
-                 print(f"{Colors.RED}Error: Interactive mode requires the 'pick' library, which is not installed or failed to load.{Colors.RESET}", file=sys.stderr)
+                 print(f"{c_red}Error: Interactive mode requires the 'pick' library, which is not installed or failed to load.{c_reset}", file=sys.stderr)
                  print("Please install it: pip install pick", file=sys.stderr)
                  if sys.platform == 'win32':
                      print("On Windows, also ensure 'windows-curses' is installed: pip install windows-curses", file=sys.stderr)
@@ -258,7 +277,7 @@ def main():
                 if not config: # Setup was cancelled
                     sys.exit(0)
             except Exception:
-                print(f"\n{Colors.RED}An error occurred during interactive setup:{Colors.RESET}")
+                print(f"\n{c_red}An error occurred during interactive setup:{c_reset}")
                 print(traceback.format_exc())
                 sys.exit(1)
 
@@ -266,7 +285,7 @@ def main():
             # --- Use Command-Line Arguments ---
             if args.directory is None:
                 # No directory given, interactive not forced, and pick not available/chosen
-                print(f"{Colors.RED}Error: No directory specified.{Colors.RESET}", file=sys.stderr)
+                print(f"{c_red}Error: No directory specified.{c_reset}", file=sys.stderr)
                 print("Provide a directory path or use interactive mode (-i).", file=sys.stderr)
                 sys.exit(1)
 
@@ -290,19 +309,11 @@ def main():
                 try:
                     config['max_llm_file_size'] = parse_size_string(args.llm_max_size, default=100 * 1024)
                 except ValueError as e_size:
-                     print(f"{Colors.RED}Error: Invalid LLM max size format '{args.llm_max_size}'. {e_size}{Colors.RESET}", file=sys.stderr)
+                     print(f"{c_red}Error: Invalid LLM max size format '{args.llm_max_size}'. {e_size}{c_reset}", file=sys.stderr)
                      sys.exit(1)
                 # Accept both repeated flags (--llm-ext py --llm-ext md) and
                 # comma-separated values (--llm-ext py,md), as documented in the README.
-                if args.llm_content_extensions:
-                    config['llm_content_extensions'] = [
-                        ext.strip()
-                        for value in args.llm_content_extensions
-                        for ext in value.split(',')
-                        if ext.strip()
-                    ]
-                else:
-                    config['llm_content_extensions'] = None
+                config['llm_content_extensions'] = parse_llm_extensions(args.llm_content_extensions)
                 config['llm_indicators'] = args.llm_indicators
 
                 if args.llm_output_dir:
@@ -312,8 +323,8 @@ def main():
                         config['output_dir'] = str(output_dir_path.resolve())
                         print(f"LLM export will be saved to: {config['output_dir']}")
                     except Exception as e_dir:
-                        print(f"{Colors.YELLOW}Warning: Could not create/use output directory '{output_dir_path}': {e_dir}{Colors.RESET}")
-                        print(f"{Colors.YELLOW}Using current directory for LLM export instead.{Colors.RESET}")
+                        print(f"{c_yellow}Warning: Could not create/use output directory '{output_dir_path}': {e_dir}{c_reset}")
+                        print(f"{c_yellow}Using current directory for LLM export instead.{c_reset}")
                         config['output_dir'] = None # Fallback
                 else:
                     config['output_dir'] = None
@@ -327,7 +338,7 @@ def main():
             # If dry-run, notify user but keep LLM export enabled for statistics
             # The actual file writing is skipped in IntuitiveDirTree.run()
             if config['dry_run']:
-                print(f"{Colors.CYAN}Dry run mode: scanning without generating output.{Colors.RESET}")
+                print(f"{c_cyan}Dry run mode: scanning without generating output.{c_reset}")
 
 
         # --- Instantiate and Run ---
@@ -342,12 +353,12 @@ def main():
             tree_generator.run()
 
         except (FileNotFoundError, NotADirectoryError, ValueError) as e_init:
-             print(f"{Colors.RED}Initialization Error: {e_init}{Colors.RESET}", file=sys.stderr)
+             print(f"{c_red}Initialization Error: {e_init}{c_reset}", file=sys.stderr)
              sys.exit(1)
         except SystemExit:
             sys.exit(1) # Already handled by error handler or user abort
         except Exception:
-            print(f"\n{Colors.RED}An unexpected error occurred during execution:{Colors.RESET}")
+            print(f"\n{c_red}An unexpected error occurred during execution:{c_reset}")
             print(traceback.format_exc())
             sys.exit(1)
 

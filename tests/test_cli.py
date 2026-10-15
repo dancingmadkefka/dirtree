@@ -7,7 +7,7 @@ from pathlib import Path
 # from .conftest import COMMON_DIR_EXCLUDES # Not directly used here
 # Must import AFTER sys.path manipulation in conftest
 try:
-    from dirtree.dirtree_cli import parse_args
+    from dirtree.dirtree_cli import parse_args, parse_llm_extensions
     from dirtree.dirtree_utils import parse_size_string # Used by main()
 except ImportError:
      pytest.skip("Skipping CLI tests, import failed.", allow_module_level=True)
@@ -108,3 +108,17 @@ def test_cli_dry_run_with_llm(tmp_path):
     args = run_parse_args([str(tmp_path), "--dry-run", "--llm"])
     assert args.dry_run is True
     assert args.export_for_llm is True  # Should remain True for stats calculation
+
+
+@pytest.mark.parametrize("raw, expected", [
+    (None, None),
+    ([], None),
+    (["py"], ["py"]),
+    (["py", "json"], ["py", "json"]),   # repeated flags
+    (["py,md"], ["py", "md"]),           # comma-separated
+    ([" py , md "], ["py", "md"]),       # whitespace tolerated
+    ([",,", " "], None),                # nothing usable
+])
+def test_parse_llm_extensions(raw, expected):
+    """--llm-ext must support comma-separated values and repeated flags."""
+    assert parse_llm_extensions(raw) == expected

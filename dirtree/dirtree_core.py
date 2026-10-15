@@ -14,7 +14,7 @@ from typing import List, Optional, Tuple, Set
 # --- Imports from other modules ---
 try:
     from .dirtree_styling import TreeStyle, Colors, DEFAULT_FILETYPE_COLORS, DEFAULT_FILETYPE_EMOJIS
-    from .dirtree_filters import passes_tree_filters, should_recurse_for_tree
+    from .dirtree_filters import passes_tree_filters, should_recurse_for_tree, matches_any_include_pattern
     from .dirtree_utils import format_bytes, log_message, handle_error
     from .dirtree_llm import generate_llm_export, should_include_content_for_llm
     from .dirtree_config import COMMON_DIR_EXCLUDES, COMMON_FILE_EXCLUDES
@@ -30,6 +30,7 @@ except ImportError:
     DEFAULT_FILETYPE_EMOJIS = {}
     def passes_tree_filters(*args, **kwargs): return True
     def should_recurse_for_tree(*args, **kwargs): return True
+    def matches_any_include_pattern(*args, **kwargs): return False
     def format_bytes(b): return str(b)
     def log_message(*args, **kwargs): pass
     def handle_error(*args, **kwargs): return True, False # Skip item, don't skip all
@@ -240,7 +241,12 @@ class IntuitiveDirTree:
             "dir_last_tee": style.get("dir_last_tee", style["last_tee"]) # Fallback
         }
 
-        for i, entry in enumerate(ordered_entries):
+        # Phase 1: evaluate filtering and collect the entries that will actually be
+        # rendered, together with their prefix-free subtrees. Recursing before
+        # rendering lets us prune directories that contain nothing worth showing
+        # when --include patterns are active, while keeping connectors correct.
+        kept_entries: List[Tuple[os.DirEntry, bool, List[str], List[Path], str]] = []
+        for entry in ordered_entries:
             entry_path = Path(entry.path)
             is_entry_dir = entry.is_dir() # Follow symlinks to determine if it's a dir for recursion/display
 
@@ -256,10 +262,6 @@ class IntuitiveDirTree:
             if not should_display_entry:
                 self._log(f"Tree Filter: '{entry_path.name}' HIDDEN from tree. Reason: {tree_exclude_reason}", "debug")
                 continue
-
-            self.items_listed_in_tree += 1
-
-            is_smart_excluded_dir_type = any(fnmatch.fnmatch(entry.name, pattern) for pattern in self.smart_dir_excludes)
 
             should_recurse_for_tree_display = False
             if is_entry_dir:
@@ -298,8 +300,41 @@ class IntuitiveDirTree:
                 except OSError as e_llm_check:
                     self._log(f"Could not check LLM inclusion for '{entry_path}': {e_llm_check}", "warning")
 
-            # --- Formatting for Tree Line ---
-            is_last_entry = (i == len(ordered_entries) - 1)
+            # --- Collect subtree (prefix-free; the parent re-indents it) ---
+            sub_lines: List[str] = []
+            sub_paths: List[Path] = []
+            if is_entry_dir and should_recurse_for_tree_display:
+                try:
+                    sub_lines, sub_paths = self._build_tree_recursive(entry_path, "", depth + 1)
+                except SystemExit:
+                    raise
+                except (PermissionError, OSError, RecursionError) as e_recurse:
+                    should_skip, self.skip_errors = handle_error(
+                        entry_path, e_recurse, self._log, self.colorize, self.skip_errors, self.interactive_prompts, phase="recursing"
+                    )
+                    if should_skip:
+                        self.skipped_items.append((str(entry_path), f"Error recursing: {e_recurse}"))
+                        sub_lines = [f"{Colors.RED}! Error in subdirectory: {e_recurse}{Colors.RESET}"]
+                    else:
+                        raise SystemExit(f"Aborted by user due to error recursing into {entry_path}.") from e_recurse
+
+            # --- Prune directories that add nothing when --include is active ---
+            if self.cli_include_patterns and is_entry_dir:
+                dir_matches_include = matches_any_include_pattern(entry_path, self.root_dir, self.cli_include_patterns)
+                if not sub_lines and not dir_matches_include:
+                    self._log(f"Tree Include: '{entry_path.name}' pruned (no included descendants).", "debug")
+                    continue
+
+            self.items_listed_in_tree += 1
+            kept_entries.append((entry, is_entry_dir, sub_lines, sub_paths, llm_indicator_str))
+
+        # Phase 2: render the kept entries with correct tree connectors. Connectors
+        # are based on the kept set, so the last visible item uses last_tee even
+        # when later siblings were filtered out.
+        for i, (entry, is_entry_dir, sub_lines, sub_paths, llm_indicator_str) in enumerate(kept_entries):
+            entry_path = Path(entry.path)
+            is_last_entry = (i == len(kept_entries) - 1)
+            is_smart_excluded_dir_type = any(fnmatch.fnmatch(entry.name, pattern) for pattern in self.smart_dir_excludes)
 
             if is_entry_dir:
                 pointer = pointers["dir_last_tee"] if is_last_entry else pointers["dir_tee"]
@@ -329,34 +364,21 @@ class IntuitiveDirTree:
             # Smart excluded dirs get a special marker in the tree
             # This is different from manually excluded for LLM dirs, which show full structure.
             smart_exclude_indicator = ""
-            if is_entry_dir and is_smart_excluded_dir_type and not should_recurse_for_tree_display:
+            if is_entry_dir and is_smart_excluded_dir_type and not sub_lines:
                 if self.colorize:
                     smart_exclude_indicator = f" {Colors.YELLOW}[excluded]{reset}"
                 else:
                     smart_exclude_indicator = " [excluded]"
 
-
             line = f"{prefix}{pointer}{emoji}{color}{display_name}{reset}{size_info_str}{llm_indicator_str}{smart_exclude_indicator}"
             tree_lines.append(line)
             listed_paths_in_tree.append(entry_path)
 
-            if is_entry_dir and should_recurse_for_tree_display:
+            if is_entry_dir and sub_lines:
                 next_prefix = prefix + (pointers["empty"] if is_last_entry else pointers["branch"])
-                try:
-                    sub_lines, sub_paths = self._build_tree_recursive(entry_path, next_prefix, depth + 1)
-                    tree_lines.extend(sub_lines)
-                    listed_paths_in_tree.extend(sub_paths)
-                except SystemExit:
-                    raise
-                except (PermissionError, OSError, RecursionError) as e_recurse:
-                    should_skip, self.skip_errors = handle_error(
-                        entry_path, e_recurse, self._log, self.colorize, self.skip_errors, self.interactive_prompts, phase="recursing"
-                    )
-                    if should_skip:
-                        self.skipped_items.append((str(entry_path), f"Error recursing: {e_recurse}"))
-                        tree_lines.append(f"{next_prefix}{Colors.RED}! Error in subdirectory: {e_recurse}{Colors.RESET}")
-                    else:
-                        raise SystemExit(f"Aborted by user due to error recursing into {entry_path}.") from e_recurse
+                for sub_line in sub_lines:
+                    tree_lines.append(f"{next_prefix}{sub_line}")
+                listed_paths_in_tree.extend(sub_paths)
 
         if real_path is not None and real_path in self._seen_paths_build:
             self._seen_paths_build.remove(real_path)

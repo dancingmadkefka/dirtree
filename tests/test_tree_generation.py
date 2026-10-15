@@ -22,6 +22,27 @@ def assert_tree_output_not_contains(output: str, items: list[str]):
         assert item not in output, f"Unexpected '{item}' in tree output.\nOutput:\n{output}"
 
 
+def test_tree_include_prunes_dirs_without_matches(tmp_path, run_dirtree_and_capture):
+    """--include must hide directories that neither match nor contain a match."""
+    root = tmp_path / "prune_proj"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "keep.py").write_text("print('keep')", encoding="utf-8")
+    (root / "empty").mkdir()
+    (root / "empty" / "nested").mkdir()
+    (root / "docs").mkdir()
+    (root / "docs" / "readme.md").write_text("# nope", encoding="utf-8")
+
+    out, _, _, _, _ = run_dirtree_and_capture({
+        'root_dir': str(root),
+        'cli_include_patterns': ["*.py"],
+        'use_smart_exclude': False,
+        'colorize': False,
+    })
+
+    assert_tree_output_contains(out, ["src", "keep.py"])
+    assert_tree_output_not_contains(out, ["empty", "nested", "docs", "readme.md"])
+
+
 # === Test Cases for Tree Display ===
 
 def test_tree_default_smart_exclude_on(base_test_structure, run_dirtree_and_capture):

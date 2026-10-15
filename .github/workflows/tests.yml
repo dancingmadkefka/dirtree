@@ -20,6 +20,15 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ['3.9', '3.12']
+        include:
+          # Broaden interpreter coverage on Linux, where every supported
+          # version is reliably available from setup-python.
+          - os: ubuntu-latest
+            python-version: '3.10'
+          - os: ubuntu-latest
+            python-version: '3.11'
+          - os: ubuntu-latest
+            python-version: '3.13'
 
     steps:
       - name: Checkout code

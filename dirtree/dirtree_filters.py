@@ -26,6 +26,19 @@ def _compile_pattern(pattern: str) -> Pattern[str]:
     _COMPILED_REGEX_CACHE[pattern] = compiled
     return compiled
 
+def matches_any_include_pattern(path: Path, root_dir: Path, cli_include_patterns: List[str]) -> bool:
+    """Return True if the item's name or its path relative to root_dir matches any include pattern."""
+    if not cli_include_patterns:
+        return False
+    name = path.name
+    relative_path_str = path.relative_to(root_dir).as_posix() if path != root_dir else "."
+    for pattern_str in cli_include_patterns:
+        regex = _compile_pattern(pattern_str)
+        if regex.fullmatch(name) or (relative_path_str != "." and regex.fullmatch(relative_path_str)):
+            return True
+    return False
+
+
 def _is_path_or_parent_excluded_by_patterns(
     path: Path, root_dir: Path, patterns: List[str], log_func: Callable
 ) -> Tuple[bool, Optional[str]]:
@@ -116,17 +129,11 @@ def passes_tree_filters(
     # only explicitly included items and their ancestors are shown.
     # The main recursion loop often handles building up parent dirs.
     # For this filter: if includes are given, the item itself must match.
-    if cli_include_patterns:
-        matched_include = False
-        for pattern_str in cli_include_patterns:
-            regex = _compile_pattern(pattern_str)
-            if regex.fullmatch(name) or (relative_path_str != "." and regex.fullmatch(relative_path_str)):
-                matched_include = True
-                break
-        if not matched_include and not path.is_dir(): # Files must match if includes are present
+    if cli_include_patterns and not path.is_dir():
+        # Files must match an include pattern. Directories may pass so their
+        # children can match, and empty ones are pruned by the tree builder.
+        if not matches_any_include_pattern(path, root_dir, cli_include_patterns):
             return False, "does not match any CLI include pattern"
-        # For directories, they can pass if they don't match, to allow children to match.
-        # The final pruning of empty included dirs happens in the tree builder.
 
     return True, None
 

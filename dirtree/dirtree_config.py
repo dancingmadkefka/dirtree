@@ -163,11 +163,12 @@ DEFAULT_LLM_INCLUDE_EXTENSIONS: Set[str] = {
     # SQL and database related
     "sql", "ddl", "dml", "prisma",
     # Other text formats
-    "log", "gitignore", "gitattributes", "gitmodules", "dockerfile", "compose.yaml", "compose.yml",
-    "makefile", "mk", "cmake", "gradle", "pom.xml", "csproj", "vbproj", "sln", "vcxproj",
-    "yaml-tml", "json-tml", "http", "rest", "openapi.yaml", "openapi.json", "asyncapi.yaml",
-    "asyncapi.json", "patch", "diff", "srt", "vtt", "sub", "wgsl", "glsl", "hlsl", "metal",
-    "rules", "webmanifest", "xml_clean",
+    # Note: only the final suffix is matched (Path.suffix), so multi-dot names
+    # like "pom.xml" or "compose.yaml" could never match and are omitted here.
+    "log", "gitignore", "gitattributes", "gitmodules", "dockerfile",
+    "makefile", "mk", "cmake", "gradle", "csproj", "vbproj", "sln", "vcxproj",
+    "http", "rest", "patch", "diff", "srt", "vtt", "sub", "wgsl", "glsl", "hlsl", "metal",
+    "rules", "webmanifest",
 }
 
 
